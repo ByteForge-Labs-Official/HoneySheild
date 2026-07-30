@@ -122,7 +122,7 @@ public class FakeShellFactory implements ShellFactory {
 
                 // Rule 4: stream-based reader with a hard 1024-byte buffer per line.
                 // An attacker that pushes gigabytes of garbage cannot exhaust memory.
-                LineReader lines = new LineReader(in, Sanitizer.MAX_LINE_LEN);
+                LineReader lines = new LineReader(in, out, Sanitizer.MAX_LINE_LEN);
 
                 String line;
                 while ((line = lines.nextLine()) != null) {
@@ -266,10 +266,14 @@ public class FakeShellFactory implements ShellFactory {
     static final class LineReader {
 
         private final InputStream in;
+        private final OutputStream out;
         private final int maxBytes;
+        private boolean lastWasCr = false;
+        private boolean inEscape = false;
 
-        LineReader(InputStream in, int maxBytes) {
+        LineReader(InputStream in, OutputStream out, int maxBytes) {
             this.in = in;
+            this.out = out;
             this.maxBytes = maxBytes;
         }
 
@@ -277,13 +281,54 @@ public class FakeShellFactory implements ShellFactory {
             ByteArrayBuilder b = new ByteArrayBuilder(maxBytes + 1);
             int read;
             while ((read = in.read()) >= 0) {
-                if (read == '\n') {
+                // 1. Handle CRLF safely
+                if (read == '\n' && lastWasCr) {
+                    lastWasCr = false;
+                    continue; // Skip LF if it immediately follows CR
+                }
+                lastWasCr = (read == '\r');
+
+                // 2. Process Enter (\r or \n)
+                if (read == '\r' || read == '\n') {
+                    if (out != null) {
+                        out.write(new byte[]{'\r', '\n'});
+                        out.flush();
+                    }
                     return b.toUtf8();
                 }
+
+                // 3. Handle Escape sequences (e.g., arrow keys)
+                if (read == 27) {
+                    inEscape = true;
+                    continue;
+                }
+                if (inEscape) {
+                    if ((read >= 'a' && read <= 'z') || (read >= 'A' && read <= 'Z') || read == '~') {
+                        inEscape = false; // end of escape sequence
+                    }
+                    continue; // drop escape chars so they don't corrupt the terminal
+                }
+
+                // 4. Handle backspace (DEL=127 or BS=8)
+                if (read == 127 || read == 8) {
+                    if (!b.isEmpty()) {
+                        b.len--;
+                        if (out != null) {
+                            out.write(new byte[]{8, ' ', 8});
+                            out.flush();
+                        }
+                    }
+                    continue;
+                }
+
+                // 5. Echo only printable characters
+                if (out != null && read >= 32 && read <= 126) {
+                    out.write(read);
+                    out.flush();
+                }
+
                 if (!b.append((byte) read)) {
                     // Cap exceeded — drain to end-of-line, then return
-                    // what we have so far so the rest of the protocol
-                    // stays in sync.
                     drainRemaining();
                     return b.toUtf8();
                 }
@@ -294,14 +339,17 @@ public class FakeShellFactory implements ShellFactory {
         private void drainRemaining() throws IOException {
             int r;
             while ((r = in.read()) >= 0) {
-                if (r == '\n') return;
+                if (r == '\n' || r == '\r') {
+                    lastWasCr = (r == '\r');
+                    return;
+                }
             }
         }
 
         /** Auto-growing but capped byte buffer. */
         private static final class ByteArrayBuilder {
             private byte[] buf;
-            private int len;
+            int len;
             private final int cap;
 
             ByteArrayBuilder(int cap) {

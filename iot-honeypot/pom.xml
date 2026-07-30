@@ -46,6 +46,11 @@
             <artifactId>bcprov-jdk18on</artifactId>
             <version>1.78.1</version>
         </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>1.78.1</version>
+        </dependency>
 
         <!-- SQLite JDBC for embedded persistence -->
         <dependency>
@@ -136,7 +141,7 @@
                                     implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.security.honeypot.HoneypotCli</mainClass>
                                     <manifestEntries>
-                                        <Class-Path>lib/bcprov-jdk18on-1.78.1.jar ../lib/bcprov-jdk18on-1.78.1.jar</Class-Path>
+                                        <Class-Path>lib/bcprov-jdk18on-1.78.1.jar ../lib/bcprov-jdk18on-1.78.1.jar lib/bcpkix-jdk18on-1.78.1.jar ../lib/bcpkix-jdk18on-1.78.1.jar lib/bcutil-jdk18on-1.78.1.jar ../lib/bcutil-jdk18on-1.78.1.jar</Class-Path>
                                     </manifestEntries>
                                 </transformer>
 

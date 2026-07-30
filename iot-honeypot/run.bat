@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+if "%JAVA_HOME%"=="" set "JAVA_HOME=C:\Program Files\Java\jdk-18.0.2.1"
 REM -- run.bat -- convenience launcher for the IoT Honeypot
 REM
 REM Usage:
@@ -43,7 +44,7 @@ goto :eof
 
 :build
 echo Building fat JAR...
-call mvn -B -ntp clean package
+call mvnw.cmd -B -ntp clean package
 if errorlevel 1 (
     echo Build failed.
     exit /b 1

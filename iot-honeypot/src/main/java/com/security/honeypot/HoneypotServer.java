@@ -265,55 +265,26 @@ public final class HoneypotServer {
         };
         server.addSessionListener(sessionLimiter);
 
-        // Host key. SimpleGeneratorHostKeyProvider in sshd-core 2.12.0 calls
-        // JCE `KeyPairGenerator.getInstance("ssh-ed25519")`, which is NOT a
-        // standard JCE alias (BC exposes `Ed25519`), so generation fails
-        // with "no such algorithm: ssh-ed25519 for provider BC". We generate
-        // the keypair ourselves via JCE and present it to the server
-        // through a tiny in-memory KeyPairProvider, bypassing the broken
-        // alias lookup entirely.
+        // Host key. We use RSA instead of Ed25519 because MINA SSHD 2.12.0 has
+        // known classpath issues with BouncyCastle's EdDSA signer (it throws
+        // "EdDSA Signer not available"). RSA is also much more realistic for an
+        // old IoT device (our honeypot profile).
         try {
-            Path keyPath = Path.of(HOST_KEY_PATH);
-            final java.security.KeyPair edKeyPair = loadOrCreateEd25519KeyPair(keyPath);
-            final String keyType = KeyPairProvider.SSH_ED25519;
-
-            server.setKeyPairProvider(new KeyPairProvider() {
-                @Override
-                public Iterable<String> getKeyTypes(
-                        org.apache.sshd.common.session.SessionContext session)
-                        throws IOException {
-                    return java.util.List.of(keyType);
-                }
-
-                @Override
-                public Iterable<java.security.KeyPair> loadKeys(
-                        org.apache.sshd.common.session.SessionContext session)
-                        throws IOException,
-                        java.security.GeneralSecurityException {
-                    return java.util.List.of(edKeyPair);
-                }
-
-                @Override
-                public java.security.KeyPair loadKey(
-                        org.apache.sshd.common.session.SessionContext session,
-                        String type) throws IOException,
-                        java.security.GeneralSecurityException {
-                    return keyType.equals(type) ? edKeyPair : null;
-                }
-            });
+            org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider keyProvider =
+                new org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider(Path.of(HOST_KEY_PATH));
+            keyProvider.setAlgorithm("RSA");
+            keyProvider.setKeySize(2048);
+            server.setKeyPairProvider(keyProvider);
         } catch (Exception e) {
             LOG.error("Failed to configure host key provider.", e);
             System.exit(1);
         }
 
-        // Publish modern signature algorithms. Without this, Apache MINA SSHD
-        // advertises only `ssh-rsa` (SHA-1) and modern OpenSSH clients abort
-        // with "getKexProposal() no resolved signatures available". Adding
-        // rsa-sha2-256/512 covers any RSA fallback path; Ed25519 stays primary.
+        // Publish modern signature algorithms (for RSA).
         server.setSignatureFactories(java.util.List.of(
-                BuiltinSignatures.ed25519,
                 BuiltinSignatures.rsaSHA512,
-                BuiltinSignatures.rsaSHA256));
+                BuiltinSignatures.rsaSHA256,
+                BuiltinSignatures.rsa));
 
         // CRITICAL SECURITY LOGIC:
         // Always return true. The honeypot's job is to *let attackers in*
