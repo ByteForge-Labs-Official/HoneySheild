@@ -1,0 +1,74 @@
+%% Network topology — three bridges with explicit ICC and internal flags
+graph LR
+    classDef host    fill:#1a1a1a,stroke:#fff,color:#fff
+    classDef bait    fill:#5a0d0d,stroke:#ff6b6b,color:#fff
+    classDef ops     fill:#0d3a5c,stroke:#5aa9ff,color:#fff
+    classDef edge    fill:#0d4d2a,stroke:#7ee08a,color:#fff
+    classDef blocked fill:#000,stroke:#f00,color:#f00,stroke-dasharray:3 3
+
+    Host(["Host (Docker engine)<br/>172.17.0.0/16"]):::host
+
+    subgraph bait["bait-net  (bridge, internal: true, ICC: OFF)"]
+        direction TB
+        NetBaitNet["172.30.0.0/24"]:::bait
+        H1["honeypot<br/>172.30.0.10"]:::bait
+        G1["gateway (bait iface)<br/>172.30.0.2"]:::bait
+        R1["relay (bait iface)<br/>172.30.0.20"]:::bait
+    end
+
+    subgraph ops["ops-net  (bridge, internal: true, ICC: ON)"]
+        direction TB
+        NetOpsNet["172.30.1.0/24"]:::ops
+        P1["postgres<br/>172.30.1.10"]:::ops
+        RD1["redis<br/>172.30.1.11"]:::ops
+        R2["relay (ops iface)<br/>172.30.1.20"]:::ops
+        PR1["prometheus<br/>172.30.1.30"]:::ops
+        GR1["grafana (ops iface)<br/>172.30.1.31"]:::ops
+        AM1["alertmanager (ops iface)<br/>172.30.1.32"]:::ops
+        NE1["node-exporter<br/>172.30.1.40"]:::ops
+        PE1["postgres-exporter<br/>172.30.1.41"]:::ops
+        RE1["redis-exporter<br/>172.30.1.42"]:::ops
+        BE1["blackbox-exporter<br/>172.30.1.43"]:::ops
+    end
+
+    subgraph edge["edge-net  (bridge, internal: false, ICC: ON)"]
+        direction TB
+        NetEdgeNet["172.30.2.0/24"]:::edge
+        G2["gateway (edge iface)<br/>172.30.2.2"]:::edge
+        GR2["grafana (edge iface)<br/>172.30.2.31"]:::edge
+        AM2["alertmanager (edge iface)<br/>172.30.2.32"]:::edge
+    end
+
+    Host -->|"eth0"| G2
+    Host -. "nat disabled: internal: true" .-> NetBaitNet
+    Host -. "nat disabled: internal: true" .-> NetOpsNet
+
+    G1 <-->|"bait: ICC OFF<br/>(no peer-to-peer)"| H1
+    G1 <-->|"bait: ICC OFF<br/>(no peer-to-peer)"| R1
+    R1 -. "honeypot peer blocked<br/>by ICC=OFF" .-> H1
+
+    R1 <-->|"ops"| P1
+    R1 <-->|"ops"| RD1
+    PR1 <-->|"ops"| R2
+    PR1 <-->|"ops"| P1
+    PR1 <-->|"ops"| RD1
+    PR1 <-->|"ops"| NE1
+    PR1 <-->|"ops"| PE1
+    PR1 <-->|"ops"| RE1
+    PR1 <-->|"ops"| BE1
+    GR1 <-->|"ops"| P1
+    GR1 <-->|"ops"| RD1
+    AM1 <-->|"ops"| PR1
+
+    G1 <-->|"ops<br/>reverse-proxy backend"| R2
+    G1 <-->|"ops<br/>reverse-proxy backend"| P1
+    G1 <-->|"ops<br/>reverse-proxy backend"| RD1
+    G1 <-->|"ops (proxied)"| GR1
+    G1 <-->|"ops (proxied)"| AM1
+
+    G2 <-->|"edge"| GR2
+    G2 <-->|"edge"| AM2
+
+    G2 -. "Cloudflare DNS-01<br/>outbound :443" .-> CF([Cloudflare API])
+    NetBaitNet -. "no internet egress" .-> Internet((Internet))
+    NetOpsNet  -. "no internet egress" .-> Internet

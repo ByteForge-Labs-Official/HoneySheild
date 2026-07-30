@@ -1,0 +1,66 @@
+{
+  "title": "Honeynet — Containers (cAdvisor)",
+  "uid": "honeynet-containers",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["honeynet", "containers"],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "name",
+        "label": "Container",
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "query": "label_values(container_memory_usage_bytes{name=~\".+\"}, name)",
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Per-container CPU (cores)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "rate(container_cpu_usage_seconds_total{name=~\"$name\"}[5m])",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Per-container working set memory",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "container_memory_working_set_bytes{name=~\"$name\"}",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Network in/out (bytes/s)",
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+      "targets": [
+        { "expr": "rate(container_network_receive_bytes_total{name=~\"$name\"}[5m])", "legendFormat": "rx {{name}}" },
+        { "expr": "rate(container_network_transmit_bytes_total{name=~\"$name\"}[5m])", "legendFormat": "tx {{name}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "OOM events total",
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "container_oom_events_total{name=~\"$name\"}",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    }
+  ]
+}

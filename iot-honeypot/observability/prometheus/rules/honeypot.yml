@@ -1,0 +1,36 @@
+groups:
+  - name: honeypot.security
+    rules:
+      - alert: HoneypotUnauthSpike
+        expr: |
+          sum by (protocol) (rate(honeypot_unauth_attempts_total[5m])) > 100
+        for: 10m
+        labels: { severity: warning, tier: honeypot }
+        annotations:
+          summary: "> 100 unauth attempts/s on {{ $labels.protocol }}"
+
+      - alert: HoneypotConnectionFlood
+        expr: honeypot_connections_active{protocol="ssh"} > 10000
+        for: 5m
+        labels: { severity: critical, tier: honeypot }
+
+      - alert: HoneypotDataExfilAttempt
+        expr: honeypot_payloads_bytes_total{protocol=~"ssh|http"} > 5e8
+        for: 15m
+        labels: { severity: critical, tier: honeypot }
+        annotations:
+          summary: "Possible exfiltration — large outbound payload on {{ $labels.protocol }}"
+
+  - name: ids.alerts
+    rules:
+      - alert: SuricataAlertBurst
+        expr: rate(ids_suricata_alerts_total[5m]) > 50
+        for: 5m
+        labels: { severity: warning, tier: ids }
+        annotations:
+          summary: "{{ $value }} alerts/s from Suricata ({{ $labels.signature }})"
+
+      - alert: ZeekNoticeAnomaly
+        expr: increase(ids_zeek_notices_total{notice_type=~"Scan::Port_Scan|Scan::Host_Scan"}[5m]) > 200
+        for: 5m
+        labels: { severity: warning, tier: ids }

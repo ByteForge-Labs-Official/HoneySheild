@@ -1,0 +1,48 @@
+%% Request / ingest sequence — attacker probe → honeypot → relay → Postgres + Redis → Grafana
+sequenceDiagram
+    autonumber
+    actor Attacker as Attacker
+    participant DNS as Cloudflare DNS
+    participant CAD as gateway (Caddy)
+    participant HP as honeypot (Java)
+    participant VOL as honeypot-data (vol)
+    participant RLY as relay (Python)
+    participant PG as postgres (TimescaleDB)
+    participant RDS as redis (Streams)
+    participant PR as prometheus
+    participant GR as grafana
+    participant AM as alertmanager
+
+    Attacker->>DNS: resolve honeypot.example.com
+    DNS-->>Attacker: <public IP>
+    Attacker->>CAD: TCP 443, ClientHello
+    CAD->>CAD: TLS handshake (Cloudflare DNS-01 cert)
+    Attacker->>CAD: SSH banner "SSH-2.0-OpenSSH_8.9"
+    CAD->>HP: reverse-proxy  → honeypot:2222
+    HP-->>CAD: fake banner "SSH-2.0-Honeypot"
+    CAD-->>Attacker: relay banner
+    Attacker->>HP: brute-force attempts (user/pass)
+    HP->>HP: log4j JSON  →  /data/honeypot.log
+    HP->>HP: SQLite INSERT INTO auth_attempts
+    HP-->>CAD: shell prompt (low-interaction)
+    CAD-->>Attacker: shell prompt
+    Attacker->>HP: session commands
+    HP->>HP: INSERT INTO commands, sessions
+
+    loop every 10s (poll) / on FS event (watchdog)
+        RLY->>VOL: read /data/honeypot.db (SQLite WAL)
+        RLY->>VOL: read /data/honeypot.log (tail)
+        RLY->>PG: INSERT INTO events.attack (... returning id)
+        RLY->>RDS: XADD honeynet:events:attack * data {...}
+    end
+
+    PR->>RLY: GET /metrics  (every 15s)
+    RLY-->>PR: relay_events_shipped_total{source="db"} 42
+    PR->>PR: rule "AttackSurge" evaluation
+    PR-->>AM: alert escalated (critical, security)
+    AM-->>PagerDuty: Events API v2
+    AM-->>Slack: webhook post
+
+    GR->>PG: SELECT count(*), date_trunc('minute', ts) ...
+    GR->>RDS: XLEN honeynet:events:attack
+    GR-->>Attacker: ◀ dashboard renders for the analyst only

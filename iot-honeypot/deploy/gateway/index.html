@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Honeynet — Status</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1   { letter-spacing: -.02em; }
+    code { background: #f4f4f5; padding: .15rem .35rem; border-radius: 4px; }
+    .muted { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>🛡️ Honeynet</h1>
+  <p class="muted">A research platform for capturing and analysing attacks against IoT devices.</p>
+  <ul>
+    <li>Dashboard — <code>/</code></li>
+    <li>Alerts    — <code>/alerts/</code>  (basic auth)</li>
+    <li>Metrics   — <code>/prom/</code>    (basic auth)</li>
+  </ul>
+  <p class="muted">If you reached this page from the public Internet, you are looking at the edge gateway.  The honeypot itself is reachable only on port 2222.</p>
+</body>
+</html>

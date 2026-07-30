@@ -1,0 +1,32 @@
+{
+  "title": "Honeynet — Alerts (Active)",
+  "uid": "honeynet-alerts",
+  "schemaVersion": 39,
+  "time": { "from": "now-3h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["honeynet", "alerts"],
+  "panels": [
+    {
+      "type": "table-old",
+      "title": "Firing alerts (from Prometheus)",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        {
+          "refId": "PrometheusAlertTable",
+          "expr": "sort_desc(ALERTS{alertstate=\"firing\", cluster=~\".+\"})",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "table-old",
+      "title": "AM routing tree (static demo)",
+      "gridPos": { "x": 0, "y": 10, "w": 24, "h": 8 },
+      "options": {
+        "showHeader": false
+      }
+    }
+  ]
+}

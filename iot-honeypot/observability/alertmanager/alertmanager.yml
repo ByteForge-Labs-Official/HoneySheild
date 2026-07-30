@@ -1,0 +1,114 @@
+# =============================================================================
+# Alertmanager configuration
+# =============================================================================
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: "${SMTP_HOST:-smtp.gmail.com}:587"
+  smtp_from: "${ALERT_FROM:-alerts@honeynet.local}"
+  smtp_auth_username: "${SMTP_USER:-alerts@honeynet.local}"
+  smtp_auth_password: "${SMTP_PASSWORD}"
+  smtp_require_tls: true
+  slack_api_url: "${SLACK_WEBHOOK_URL}"
+
+# ---------------------------------------------------------------------------
+# Templates
+# ---------------------------------------------------------------------------
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+# ---------------------------------------------------------------------------
+# Routes — label-based routing with sub-routes
+# ---------------------------------------------------------------------------
+route:
+  receiver: "default"
+  group_by: ["alertname", "service"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Critical → page (PD) immediately
+    - matchers:
+        - severity = "critical"
+      receiver: "pagerduty"
+      group_wait: 10s
+      repeat_interval: 30m
+
+    # Tier-host CPU / memory / disk alerts → ops Slack
+    - matchers:
+        - tier = "host"
+        - severity = "warning"
+      receiver: "ops-slack"
+      group_wait: 1m
+
+    # Honeypot domain alerts → sec Slack
+    - matchers:
+        - tier = "honeypot"
+        - tier = "ids"
+      receiver: "sec-slack"
+
+    # Database alerts → DBA Slack
+    - matchers:
+        - tier = "database"
+      receiver: "dba-slack"
+
+    # Everything else → default
+    - receiver: "default"
+
+# ---------------------------------------------------------------------------
+# Receivers
+# ---------------------------------------------------------------------------
+receivers:
+  - name: "default"
+    email_configs:
+      - to: "ops@honeynet.local"
+        send_resolved: true
+
+  - name: "pagerduty"
+    pagerduty_configs:
+      - routing_key: "${PAGERDUTY_ROUTING_KEY}"
+        description: "{{ .GroupLabels.alertname }} — {{ .CommonAnnotations.summary }}"
+        details:
+          firing: "{{ .Alerts.Firing | len }}"
+          resolved: "{{ .Alerts.Resolved | len }}"
+          cluster: "{{ .CommonLabels.cluster }}"
+
+  - name: "ops-slack"
+    slack_configs:
+      - channel: "#ops-alerts"
+        title: "{{ .CommonAnnotations.summary }}"
+        text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+        send_resolved: true
+
+  - name: "sec-slack"
+    slack_configs:
+      - channel: "#sec-alerts"
+        title: "{{ .CommonAnnotations.summary }}"
+        text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+
+  - name: "dba-slack"
+    slack_configs:
+      - channel: "#dba-alerts"
+        title: "{{ .CommonAnnotations.summary }}"
+
+# ---------------------------------------------------------------------------
+# Inhibitions — suppress noisy downstream alerts
+# ---------------------------------------------------------------------------
+inhibit_rules:
+  - source_matchers:
+      - alertname = "HostDown"
+    target_matchers:
+      - severity = "warning"
+    equal: ["instance"]
+
+  - source_matchers:
+      - alertname = "PostgresDown"
+    target_matchers:
+      - tier = "api"
+    equal: ["instance"]
+
+  - source_matchers:
+      - alertname = "RedisDown"
+    target_matchers:
+      - alertname = "RedisHitRateLow"
+    equal: ["instance"]</content>
+</invoke>

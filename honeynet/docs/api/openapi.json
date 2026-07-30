@@ -1,0 +1,41 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Honeynet Research Platform API",
+    "version": "1.0.0",
+    "description": "REST + WebSocket API for the IoT honeynet research platform."
+  },
+  "servers": [{ "url": "/api/v1" }],
+  "tags": [
+    { "name": "auth" }, { "name": "devices" }, { "name": "attacks" },
+    { "name": "events" }, { "name": "analytics" }, { "name": "threats" },
+    { "name": "admin" }, { "name": "health" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Liveness/readiness probe",
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/auth/login":         { "post": { "tags": ["auth"],   "summary": "JWT login"          } },
+    "/auth/refresh":       { "post": { "tags": ["auth"],   "summary": "Refresh access JWT" } },
+    "/auth/logout":        { "post": { "tags": ["auth"],   "summary": "Revoke refresh"     } },
+    "/devices":            { "get":  { "tags": ["devices"], "summary": "List devices"        } },
+    "/devices/{id}":       { "get":  { "tags": ["devices"], "summary": "Get device"          } },
+    "/devices/{id}/control": { "post": { "tags": ["devices"], "summary": "Send MQTT command to bait device" } },
+    "/attacks":            { "get":  { "tags": ["attacks"], "summary": "List attacks (paginated)" } },
+    "/attacks/{id}":       { "get":  { "tags": ["attacks"], "summary": "Attack detail" } },
+    "/attacks/{id}/events":{ "get":  { "tags": ["attacks"], "summary": "Attack event ledger" } },
+    "/analytics/top-ips":  { "get":  { "tags": ["analytics"], "summary": "Top source IPs" } },
+    "/analytics/timeline": { "get":  { "tags": ["analytics"], "summary": "Attack time-series" } },
+    "/analytics/geo":      { "get":  { "tags": ["analytics"], "summary": "Geo-attack distribution" } },
+    "/threats/iocs":       { "get":  { "tags": ["threats"], "summary": "Indicators of Compromise" } },
+    "/threats/mitre":      { "get":  { "tags": ["threats"], "summary": "MITRE ATT&CK tag cloud" } },
+    "/threats/feedback":   { "post": { "tags": ["threats"], "summary": "Operator feedback on AI labels" } },
+    "/admin/users":        { "get":  { "tags": ["admin"],  "summary": "List users (admin)" } },
+    "/admin/audit":        { "get":  { "tags": ["admin"],  "summary": "Operator audit log" } },
+    "/ws/attacks":         { "get":  { "tags": ["ws"],      "summary": "WebSocket: live attack stream" } }
+  }
+}

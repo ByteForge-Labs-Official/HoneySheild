@@ -1,0 +1,29 @@
+# ============================================================================
+# node_exporter / postgres_exporter / redis_exporter / blackbox_exporter
+# ----------------------------------------------------------------------------
+# All exporters share the same supervisor (prometheus) — these are just the
+# flags / config files each one needs.
+# ============================================================================
+# node_exporter — textfile collector directory (cheap custom-metrics path)
+textfile:
+  directory: /etc/node-exporter/textfile/
+
+# postgres_exporter — DSN + slow-query whitelist
+pg:
+  dsn: 'postgresql://honeynet_ro:$(cat /run/secrets/postgres_ro_password)@postgres:5432/honeynet?sslmode=require'
+
+# redis_exporter — single instance
+redis:
+  addr: 'redis://redis:6379'
+  include-latency: 'all'
+  include-streams: 'all'
+  include-modules: 'all'
+
+# blackbox_exporter — probe modules (one for the SSH banner)
+modules:
+  ssh_banner:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      query_response:
+        - expect: "^SSH-2.0-"

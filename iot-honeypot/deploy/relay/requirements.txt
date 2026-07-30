@@ -1,0 +1,11 @@
+# Pinned runtime dependencies for the side-car relay.
+# All chosen for the smallest possible attack surface — no native extensions
+# beyond asyncpg's libpq.
+asyncpg==0.29.0
+redis==5.0.4
+watchdog==4.0.0
+prometheus-client==0.20.0
+structlog==24.1.0
+pydantic==2.7.1
+pydantic-settings==2.2.1
+orjson==3.10.3

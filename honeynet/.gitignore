@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# Honeynet Research Platform — root .gitignore
+# ---------------------------------------------------------------------------
+# 12-factor layout: secrets stay out of git; ephemeral data lives in ./data/
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# Python — backend
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Node — frontend
+node_modules/
+.pnpm-store/
+.yarn/
+.pnp.*
+.parcel-cache/
+.vite/
+.eslintcache
+.stylelintcache
+.next/
+out/
+
+# Testing / artifacts
+playwright-report/
+test-results/
+cypress/videos/
+cypress/screenshots/
+junit/
+
+# Data — runtime artifacts (mounted as volumes)
+data/**
+!data/.gitkeep
+!data/README.md
+
+# Logs
+logs/
+*.log
+*.log.*
+!.gitkeep
+
+# Editors / OS
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.example.json
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Docker / compose
+*.pid
+docker-compose.override.yml
+
+# Backups
+db/postgresql/backups/*
+!db/postgresql/backups/.gitkeep
+
+# pcap / forensic blobs
+*.pcap
+*.pcapng
+!data/pcap/.gitkeep

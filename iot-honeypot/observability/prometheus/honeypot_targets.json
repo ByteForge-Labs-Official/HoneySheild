@@ -1,0 +1,26 @@
+[
+  {
+    "targets": ["cowrie:9000"],
+    "labels": { "honeypot": "cowrie", "protocol": "ssh" }
+  },
+  {
+    "targets": ["dionaea:9000"],
+    "labels": { "honeypot": "dionaea", "protocol": "telnet" }
+  },
+  {
+    "targets": ["mqtt-bait:9000"],
+    "labels": { "honeypot": "mqtt-bait", "protocol": "mqtt" }
+  },
+  {
+    "targets": ["http-bait:9000"],
+    "labels": { "honeypot": "http-bait", "protocol": "http" }
+  },
+  {
+    "targets": ["rtsp-bait:9000"],
+    "labels": { "honeypot": "rtsp-bait", "protocol": "rtsp" }
+  },
+  {
+    "targets": ["modbus-bait:9000"],
+    "labels": { "honeypot": "modbus-bait", "protocol": "modbus" }
+  }
+]

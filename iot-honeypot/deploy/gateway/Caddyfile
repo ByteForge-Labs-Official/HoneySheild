@@ -1,0 +1,80 @@
+# ============================================================================
+# Caddyfile — Honeynet edge gateway
+# ----------------------------------------------------------------------------
+# Terminates TLS for the three public-facing surfaces and reverse-proxies
+# them to internal services on the `ops-net` bridge.
+#
+# DNS-01 challenge:  set the CF_API_TOKEN env (sourced from
+# /run/secrets/caddy_cloudflare_token) before `docker compose up`.
+# ============================================================================
+
+{
+    # Email for Let's Encrypt notifications (overwritten at runtime via env).
+    email {$LETSENCRYPT_EMAIL:admin@example.com}
+    # Caddy admin API on :2019 — not exposed to the host.
+    admin localhost:2019
+    # Cloudflare DNS-01 — token injected from /run/secrets.
+    acme_dns cloudflare {$CF_API_TOKEN}
+}
+
+# ---------------------------------------------------------------------------
+# Edge — public landing / status page (read-only).
+# ---------------------------------------------------------------------------
+:80 {
+    redir https://{host}{uri} permanent
+}
+
+# ---------------------------------------------------------------------------
+# Honeynet dashboard, alertmanager, Prometheus — three sub-domains, one
+# wildcard cert.  Each backend is reachable only on the internal
+# `ops-net` bridge; this file is the *only* door from the Internet.
+# ---------------------------------------------------------------------------
+{$DASHBOARD_DOMAIN:honeynet.example.com} {
+    encode zstd gzip
+    reverse_proxy grafana:3000
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+        protocols tls1.2 tls1.3
+        ciphers TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+    }
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "DENY"
+        Referrer-Policy           "no-referrer"
+        Permissions-Policy        "geolocation=(), microphone=(), camera=()"
+    }
+    log
+}
+
+{$ALERTMANAGER_DOMAIN:alerts.example.com} {
+    encode zstd gzip
+    reverse_proxy alertmanager:9093
+    tls { dns cloudflare {env.CF_API_TOKEN} }
+    basicauth {
+        {$AM_USER} {$AM_HASH}
+    }
+}
+
+{$PROMETHEUS_DOMAIN:prom.example.com} {
+    encode zstd gzip
+    reverse_proxy prometheus:9090
+    tls { dns cloudflare {env.CF_API_TOKEN} }
+    basicauth {
+        {$PROM_USER} {$PROM_HASH}
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Honeypot surface — the *only* place real attack traffic ever lands.
+# ---------------------------------------------------------------------------
+{$HONEYPOT_DOMAIN:bait.example.com}:443 {
+    tls { dns cloudflare {env.CF_API_TOKEN} }
+    reverse_proxy honeypot:2222 {
+        # Preserve the source IP — required for accurate geo-blocking.
+        header_up X-Forwarded-For {remote_host}
+        # No response buffering — close the connection as soon as the
+        # attacker disconnects, frees a honeypot worker slot instantly.
+        flush_interval -1
+    }
+}

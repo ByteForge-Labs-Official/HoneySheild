@@ -1,0 +1,701 @@
+# ============================================================================
+# Honeynet — top-level docker-compose
+# ----------------------------------------------------------------------------
+# Services, networks, volumes, secrets, healthchecks and restart policies
+# for the entire platform.  Run from the project root:
+#
+#     cp deploy/.env.example deploy/.env   # then edit
+#     mkdir -p deploy/secrets              # populate from README.md
+#     docker compose -f deploy/docker-compose.yml --env-file deploy/.env \
+#                    config > docker-compose.resolved.yml   # validate
+#     docker compose -f deploy/docker-compose.yml --env-file deploy/.env \
+#                    --profile core up -d
+#
+# Profiles
+#   core      : honeypot + relay + db + cache + gateway       (default)
+#   observability : adds prometheus, grafana, alertmanager,
+#                   node/postgres/redis/blackbox exporters
+#   honeypot-extras : future cowrie / dionaea side-cars
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Networks
+# ----------------------------------------------------------------------------
+#   bait-net  – only the honeypot, the relay and the gateway reach it.
+#               ICC off so a compromised honeypot can't pivot to the DB.
+#   ops-net   – internal services (db, redis, exporters, prometheus).
+#               Not reachable from the public Internet.
+#   edge-net  – gateway + observability UIs (grafana, alertmanager, prom).
+# ----------------------------------------------------------------------------
+networks:
+  bait-net:
+    name: honeynet-bait
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+
+  ops-net:
+    name: honeynet-ops
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+    ipam:
+      config:
+        - subnet: 172.30.20.0/24
+
+  edge-net:
+    name: honeynet-edge
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+    ipam:
+      config:
+        - subnet: 172.30.30.0/24
+
+# ----------------------------------------------------------------------------
+# Volumes
+# ----------------------------------------------------------------------------
+volumes:
+  honeypot-data:
+    name: honeynet-data
+    driver: local
+  postgres-data:
+    name: honeynet-postgres
+    driver: local
+  redis-data:
+    name: honeynet-redis
+    driver: local
+  prometheus-data:
+    name: honeynet-prometheus
+    driver: local
+  grafana-data:
+    name: honeynet-grafana
+    driver: local
+  alertmanager-data:
+    name: honeynet-alertmanager
+    driver: local
+  caddy-data:
+    name: honeynet-caddy
+    driver: local
+  caddy-config:
+    name: honeynet-caddy-config
+    driver: local
+
+# ----------------------------------------------------------------------------
+# Secrets — each is a file under deploy/secrets/.  The `source:` value is the
+# filename relative to the compose project root.
+# ----------------------------------------------------------------------------
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  postgres_ro_password:
+    file: ./secrets/postgres_ro_password.txt
+  relay_password:
+    file: ./secrets/relay_password.txt
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+  grafana_secret_key:
+    file: ./secrets/grafana_secret_key.txt
+  grafana_db_password:
+    file: ./secrets/grafana_db_password.txt
+  am_basic_auth:
+    file: ./secrets/am_basic_auth.txt
+  prom_basic_auth:
+    file: ./secrets/prom_basic_auth.txt
+  caddy_cloudflare_token:
+    file: ./secrets/caddy_cloudflare_token.txt
+  pagerduty_key:
+    file: ./secrets/pagerduty_key.txt
+  slack_webhook_sec:
+    file: ./secrets/slack_webhook_sec.txt
+  slack_webhook_ops:
+    file: ./secrets/slack_webhook_ops.txt
+  slack_webhook_dba:
+    file: ./secrets/slack_webhook_dba.txt
+
+# ============================================================================
+# SERVICES
+# ============================================================================
+services:
+
+  # --------------------------------------------------------------------------
+  # Honeypot — the Java/MINA SSHD low-interaction server.
+  # --------------------------------------------------------------------------
+  honeypot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: honeynet/honeypot:${TAG:-latest}
+    container_name: honeynet-honeypot
+    hostname: honeypot
+
+    restart: unless-stopped
+
+    # Bridge to bait-net only — no direct path to the database.
+    networks:
+      - bait-net
+
+    # Read-only root FS; /data is the only writable mount.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,nosuid,nodev,noexec
+      - /run:size=8m,mode=0755,nosuid,nodev,noexec
+    volumes:
+      - honeypot-data:/data
+
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+            - apparmor:docker-default
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 256
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+        delay: 5s
+
+    ulimits:
+      nofile: { soft: 4096, hard: 8192 }
+      nproc:  { soft:  128, hard:  256 }
+      fsize:  268435456
+
+    # Liveness: refuse if the SSH banner stops coming back.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${HONEYPOT_PORT:-2222} || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    environment:
+      HONEYPOT_PORT:  "${HONEYPOT_PORT:-2222}"
+      HONEYPOT_PROFILE: "${HONEYPOT_PROFILE:-full}"
+      HONEYPOT_BIND:   "${HONEYPOT_BIND:-0.0.0.0}"
+      JAVA_OPTS: "${JAVA_OPTS:--Xms64m -Xmx256m -XX:MaxRAMPercentage=75.0}"
+      TZ: "${TZ:-UTC}"
+
+    logging:
+      driver: json-file
+      options: { max-size: "${LOG_MAX_SIZE:-10m}", max-file: "${LOG_MAX_FILE:-3}" }
+
+  # --------------------------------------------------------------------------
+  # Relay — side-car that tails /data and ships to Postgres/Redis.
+  # --------------------------------------------------------------------------
+  relay:
+    build:
+      context: ./relay
+    image: honeynet/relay:${TAG:-latest}
+    container_name: honeynet-relay
+    hostname: relay
+
+    restart: unless-stopped
+    depends_on:
+      honeypot:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - bait-net   # reads /data via the shared volume
+      - ops-net    # writes to db + cache
+
+    # Read-only root FS.  The honeypot-data volume is mounted R/W because
+    # the relay has to read the SQLite WAL — but everything else is sealed.
+    read_only: true
+    tmpfs: [/tmp:size=16m,mode=1777,nosuid,nodev,noexec]
+    volumes:
+      - honeypot-data:/data:ro,suid=0,dev=0,exec=0
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128M }
+        reservations: { cpus: "0.05", memory: 32M }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9101/healthz',timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    environment:
+      RELAY_PG_DSN:          "${RELAY_PG_DSN}"
+      RELAY_REDIS_URL:       "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      RELAY_HONEYPOT_DB:     /data/honeypot.db
+      RELAY_HONEYPOT_LOG:    /data/honeypot.log
+      RELAY_POLL_INTERVAL_S: "${RELAY_POLL_INTERVAL_S:-10}"
+      RELAY_LOG_LEVEL:       info
+      TZ: "${TZ:-UTC}"
+
+    secrets:
+      - postgres_password
+      - relay_password
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # --------------------------------------------------------------------------
+  # Postgres — canonical store + TimescaleDB.
+  # --------------------------------------------------------------------------
+  postgres:
+    build:
+      context: ./postgres
+    image: honeynet/postgres:${TAG:-16}
+    container_name: honeynet-postgres
+    hostname: postgres
+
+    restart: unless-stopped
+
+    # Host port mapping for local-dev tooling (alembic, psql, pgAdmin).
+    # Comment out in production where you reach Postgres via the ops-net.
+    ports:
+      - "5432:5432/tcp"
+
+    networks:
+      - ops-net
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: false  # postgres must write its data dir
+    tmpfs:
+      - /tmp:size=128m,mode=1777,nosuid,nodev,noexec
+      - /run:size=8m,mode=0755,nosuid,nodev,noexec
+      - /var/run/postgresql:size=8m,mode=1777,uid=999,gid=999
+
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+        reservations: { cpus: "0.25", memory: 128M }
+      restart_policy: { condition: on-failure, max_attempts: 10, delay: 5s }
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER}\" -d \"${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: "${POSTGRES_DB}"
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+
+    secrets:
+      - postgres_password
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # --------------------------------------------------------------------------
+  # Redis — pub/sub + Streams + RedisJSON.
+  # --------------------------------------------------------------------------
+  redis:
+    build:
+      context: ./redis
+    image: honeynet/redis:${TAG:-7}
+    container_name: honeynet-redis
+    hostname: redis
+
+    restart: unless-stopped
+
+    networks:
+      - ops-net
+
+    volumes:
+      - redis-data:/data
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp:size=32m,mode=1777,nosuid,nodev,noexec]
+
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+        reservations: { cpus: "0.1", memory: 64M }
+      restart_policy: { condition: on-failure, max_attempts: 10, delay: 5s }
+
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" PING | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+
+    secrets:
+      - postgres_password      # unused here; placeholder for secret-mount sanity
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # --------------------------------------------------------------------------
+  # Gateway — Caddy reverse proxy + TLS termination.
+  # --------------------------------------------------------------------------
+  gateway:
+    build:
+      context: ./gateway
+    image: honeynet/gateway:${TAG:-latest}
+    container_name: honeynet-gateway
+    hostname: gateway
+
+    restart: unless-stopped
+
+    networks:
+      - bait-net    # reach the honeypot
+      - edge-net    # serve dashboards
+      - ops-net     # reach grafana/prom/alertmanager
+
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp:size=32m,mode=1777,nosuid,nodev,noexec]
+
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+        reservations: { cpus: "0.05", memory: 32M }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD-SHELL", "caddy health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    environment:
+      LETSENCRYPT_EMAIL: "${LETSENCRYPT_EMAIL}"
+      DASHBOARD_DOMAIN:   "${DASHBOARD_DOMAIN}"
+      ALERTMANAGER_DOMAIN: "${ALERTMANAGER_DOMAIN}"
+      PROMETHEUS_DOMAIN:  "${PROMETHEUS_DOMAIN}"
+      HONEYPOT_DOMAIN:    "${HONEYPOT_DOMAIN}"
+      AM_USER:            "${AM_USER}"
+      AM_HASH:            "${AM_PASSWORD}"
+      PROM_USER:          "${PROM_USER}"
+      PROM_HASH:          "${PROM_PASSWORD}"
+
+    secrets:
+      - caddy_cloudflare_token
+      - am_basic_auth
+      - prom_basic_auth
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ==========================================================================
+  # OBSERVABILITY PROFILE — opt-in via --profile observability
+  # ==========================================================================
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: honeynet-prometheus
+    hostname: prometheus
+
+    restart: unless-stopped
+    profiles: [observability]
+
+    networks: [ops-net]
+
+    user: "65534:65534"      # nobody
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777,nosuid,nodev,noexec]
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 512M }, reservations: { cpus: "0.1", memory: 128M } }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    depends_on:
+      relay:    { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: honeynet-grafana
+    hostname: grafana
+
+    restart: unless-stopped
+    profiles: [observability]
+
+    networks: [ops-net, edge-net]
+
+    user: "472:472"          # grafana
+    read_only: true
+    tmpfs: [/tmp:size=32m,mode=1777,nosuid,nodev,noexec]
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    volumes:
+      - ./observability/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+    environment:
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ADMIN_USER: "${GF_ADMIN_USER}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_ADMIN_PASSWORD}"
+      GF_SECURITY_SECRET_KEY: "${GF_SECRET_KEY}"
+
+    secrets:
+      - grafana_admin_password
+      - grafana_secret_key
+      - grafana_db_password
+      - postgres_password
+
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M }, reservations: { cpus: "0.1", memory: 64M } }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    depends_on:
+      postgres: { condition: service_healthy }
+
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: honeynet-alertmanager
+    hostname: alertmanager
+
+    restart: unless-stopped
+    profiles: [observability]
+
+    networks: [ops-net, edge-net]
+
+    user: "65534:65534"
+    read_only: true
+    tmpfs: [/tmp:size=32m,mode=1777,nosuid,nodev,noexec]
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+
+    command: ['--config.file=/etc/alertmanager/alertmanager.yml', '--storage.path=/alertmanager']
+
+    secrets:
+      - pagerduty_key
+      - slack_webhook_sec
+      - slack_webhook_ops
+      - slack_webhook_dba
+
+    deploy:
+      resources: { limits: { cpus: "0.25", memory: 128M }, reservations: { cpus: "0.05", memory: 32M } }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9093/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: honeynet-node-exporter
+    hostname: node-exporter
+
+    restart: unless-stopped
+    profiles: [observability]
+
+    networks: [ops-net]
+
+    pid: host                # see host process list
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host/root'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+
+    deploy:
+      resources: { limits: { cpus: "0.1", memory: 32M } }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: honeynet-postgres-exporter
+    hostname: postgres-exporter
+
+    restart: unless-stopped
+    profiles: [observability]
+
+    networks: [ops-net]
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    environment:
+      DATA_SOURCE_NAME: "postgresql://honeynet_ro:$(cat /run/secrets/postgres_ro_password)@postgres:5432/honeynet?sslmode=require"
+
+    secrets:
+      - postgres_ro_password
+
+    deploy:
+      resources: { limits: { cpus: "0.1", memory: 32M } }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: honeynet-redis-exporter
+    hostname: redis-exporter
+
+    restart: unless-stopped
+    profiles: [observability]
+
+    networks: [ops-net]
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+      REDIS_PASSWORD_FILE: /run/secrets/postgres_password
+
+    secrets:
+      - postgres_password   # contains the redis password in this layout
+
+    deploy:
+      resources: { limits: { cpus: "0.1", memory: 32M } }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9121/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: honeynet-blackbox-exporter
+    hostname: blackbox-exporter
+
+    restart: unless-stopped
+    profiles: [observability]
+
+    networks: [ops-net]
+
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+    volumes:
+      - ./observability/exporters/web-config.yml:/etc/blackbox_exporter/config.yml:ro
+
+    command: ['--config.file=/etc/blackbox_exporter/config.yml']
+
+    deploy:
+      resources: { limits: { cpus: "0.1", memory: 32M } }
+      restart_policy: { condition: on-failure, max_attempts: 5, delay: 5s }
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9115/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    logging: { driver: json-file, options: { max-size: "10m", max-file: "3" } }

@@ -1,0 +1,70 @@
+# ============================================================================
+# alertmanager.yml — Honeynet routing
+# ----------------------------------------------------------------------------
+# Routes by severity and "tier" label.  Critical → PagerDuty + Slack
+# #sec-incidents.  Warnings → Slack #ops-alerts.  Everything else →
+# email digest.  Inhibition rules collapse cascading failures.
+# ============================================================================
+global:
+  resolve_timeout: 5m
+  smtp_smarthost:  smtp.example.com:587
+  smtp_from:       alerts@example.com
+  smtp_require_tls: true
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  receiver: 'email-default'
+  group_by: [alertname, tier, severity]
+  group_wait:      30s
+  group_interval:  5m
+  repeat_interval: 4h
+  routes:
+    - matchers:      [severity="critical"]
+      receiver:      'pagerduty-critical'
+      group_wait:    10s
+      repeat_interval: 1h
+      continue: true
+    - matchers:      [tier="security"]
+      receiver:      'slack-sec'
+    - matchers:      [tier="database"]
+      receiver:      'slack-dba'
+    - matchers:      [tier="host"]
+      receiver:      'slack-ops'
+
+receivers:
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - routing_key_file: /run/secrets/pagerduty_key
+        send_resolved: true
+  - name: 'slack-sec'
+    slack_configs:
+      - api_url_file: /run/secrets/slack_webhook_sec
+        channel: '#sec-incidents'
+        send_resolved: true
+  - name: 'slack-dba'
+    slack_configs:
+      - api_url_file: /run/secrets/slack_webhook_dba
+        channel: '#dba-alerts'
+        send_resolved: true
+  - name: 'slack-ops'
+    slack_configs:
+      - api_url_file: /run/secrets/slack_webhook_ops
+        channel: '#ops-alerts'
+        send_resolved: true
+  - name: 'email-default'
+    email_configs:
+      - to: 'oncall@example.com'
+        headers: { Subject: '[honeynet] {{ .GroupLabels.alertname }}' }
+
+inhibit_rules:
+  - source_matchers: [alertname="HostDown"]
+    target_matchers: [severity="warning", tier="host"]
+    equal: [instance]
+  - source_matchers: [alertname="PostgresDown"]
+    target_matchers: [tier="application"]
+    equal: [cluster]
+  - source_matchers: [alertname="RedisDown"]
+    target_matchers: [alertname="RelayShipErrors"]
+    equal: [cluster]
