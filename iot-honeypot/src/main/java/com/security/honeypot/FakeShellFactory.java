@@ -28,7 +28,7 @@ public class FakeShellFactory implements ShellFactory {
 
     @Override
     public Command createShell(ChannelSession channel) {
-        return new FakeShell();
+        return new FakeShell(channel);
     }
 
     /**
@@ -42,12 +42,21 @@ public class FakeShellFactory implements ShellFactory {
 
         private static final Logger LOG = LoggerFactory.getLogger(FakeShell.class);
 
+        private final ChannelSession channel;
         private InputStream in;
         private OutputStream out;
         private OutputStream err;
         private ExitCallback callback;
         private Environment env;
         private Thread ioThread;
+
+        public FakeShell(ChannelSession channel) {
+            this.channel = channel;
+        }
+
+        public FakeShell() {
+            this(null);
+        }
 
         // Canned outputs keyed on the *exact* command. Lower-cased.
         private static final Map<String, String> RESPONSES = new ConcurrentHashMap<>();
@@ -165,8 +174,10 @@ public class FakeShellFactory implements ShellFactory {
             }
         }
 
-        /** Wraps {@link #respondTo} so any internal exception is converted
-         *  to the standard sh "command not found" message. Rule 5. */
+        /**
+         * Wraps {@link #respondTo} so any internal exception is converted
+         * to the standard sh "command not found" message. Rule 5.
+         */
         private String safeRespondTo(String cmd, String lower) {
             try {
                 return respondTo(cmd, lower);
@@ -179,21 +190,32 @@ public class FakeShellFactory implements ShellFactory {
             }
         }
 
-        /** Best-effort client IP from the environment; falls back to unknown. */
+        /** Best-effort client IP from the channel session; falls back to 127.0.0.1. */
         private String clientIp() {
-            if (env == null) {
-                return "unknown";
-            }
-            try {
-                String peer = env.getEnv().get("SSH_CLIENT");
-                if (peer != null && !peer.isBlank()) {
-                    // Typical value: "203.0.113.10 51123 22"
-                    return peer.split("\\s+")[0];
+            if (channel != null && channel.getServerSession() != null) {
+                try {
+                    java.net.SocketAddress remote = channel.getServerSession().getClientAddress();
+                    if (remote instanceof java.net.InetSocketAddress) {
+                        java.net.InetSocketAddress isa = (java.net.InetSocketAddress) remote;
+                        if (isa.getAddress() != null) {
+                            return isa.getAddress().getHostAddress();
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // fall through
                 }
-            } catch (Exception ignored) {
-                // fall through
             }
-            return "unknown";
+            if (env != null) {
+                try {
+                    String peer = env.getEnv().get("SSH_CLIENT");
+                    if (peer != null && !peer.isBlank()) {
+                        return peer.split("\\s+")[0];
+                    }
+                } catch (Exception ignored) {
+                    // fall through
+                }
+            }
+            return "127.0.0.1";
         }
 
         private void writeBanner() throws IOException {
@@ -291,7 +313,7 @@ public class FakeShellFactory implements ShellFactory {
                 // 2. Process Enter (\r or \n)
                 if (read == '\r' || read == '\n') {
                     if (out != null) {
-                        out.write(new byte[]{'\r', '\n'});
+                        out.write(new byte[] { '\r', '\n' });
                         out.flush();
                     }
                     return b.toUtf8();
@@ -314,7 +336,7 @@ public class FakeShellFactory implements ShellFactory {
                     if (!b.isEmpty()) {
                         b.len--;
                         if (out != null) {
-                            out.write(new byte[]{8, ' ', 8});
+                            out.write(new byte[] { 8, ' ', 8 });
                             out.flush();
                         }
                     }
@@ -358,7 +380,8 @@ public class FakeShellFactory implements ShellFactory {
             }
 
             boolean append(byte b) {
-                if (len >= cap) return false;
+                if (len >= cap)
+                    return false;
                 if (len == buf.length) {
                     int next = Math.min(cap, buf.length * 2);
                     byte[] grown = new byte[next];

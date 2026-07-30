@@ -31,6 +31,15 @@ export interface Attack {
   password?: string;
   mitre_tags?: string[];
   raw_event?: Record<string, unknown>;
+  /** Raw fields preserved when sourced from the FastAPI backend. */
+  src_ip?: string | null;
+  src_port?: number | null;
+  dst_ip?: string | null;
+  dst_port?: number | null;
+  event_type?: string;
+  created_at?: string;
+  payload?: Record<string, unknown>;
+  session_id?: string | null;
 }
 
 export interface AttackStats {

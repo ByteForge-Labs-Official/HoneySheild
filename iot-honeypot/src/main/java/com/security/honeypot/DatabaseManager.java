@@ -25,55 +25,49 @@ public final class DatabaseManager {
     private static final String DB_URL = "jdbc:sqlite:honeypot.db";
 
     /** DDL: capture every brute-force attempt. */
-    private static final String CREATE_AUTH_LOGS =
-            "CREATE TABLE IF NOT EXISTS auth_logs ("
-                    + " id          INTEGER PRIMARY KEY AUTOINCREMENT,"
-                    + " timestamp   TEXT    NOT NULL,"
-                    + " ip_address  TEXT    NOT NULL,"
-                    + " username    TEXT    NOT NULL,"
-                    + " password    TEXT    NOT NULL,"
-                    + " protocol    TEXT    NOT NULL DEFAULT 'ssh'"
-                    + ");";
+    private static final String CREATE_AUTH_LOGS = "CREATE TABLE IF NOT EXISTS auth_logs ("
+            + " id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+            + " timestamp   TEXT    NOT NULL,"
+            + " ip_address  TEXT    NOT NULL,"
+            + " username    TEXT    NOT NULL,"
+            + " password    TEXT    NOT NULL,"
+            + " protocol    TEXT    NOT NULL DEFAULT 'ssh'"
+            + ");";
 
     /** DDL: capture every shell command the attacker types. */
-    private static final String CREATE_COMMAND_LOGS =
-            "CREATE TABLE IF NOT EXISTS command_logs ("
-                    + " id          INTEGER PRIMARY KEY AUTOINCREMENT,"
-                    + " timestamp   TEXT    NOT NULL,"
-                    + " ip_address  TEXT    NOT NULL,"
-                    + " command     TEXT    NOT NULL,"
-                    + " protocol    TEXT    NOT NULL DEFAULT 'ssh'"
-                    + ");";
+    private static final String CREATE_COMMAND_LOGS = "CREATE TABLE IF NOT EXISTS command_logs ("
+            + " id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+            + " timestamp   TEXT    NOT NULL,"
+            + " ip_address  TEXT    NOT NULL,"
+            + " command     TEXT    NOT NULL,"
+            + " protocol    TEXT    NOT NULL DEFAULT 'ssh'"
+            + ");";
 
     /** DDL: capture every HTTP request hitting the web-admin honeypot. */
-    private static final String CREATE_HTTP_LOGS =
-            "CREATE TABLE IF NOT EXISTS http_request_logs ("
-                    + " id          INTEGER PRIMARY KEY AUTOINCREMENT,"
-                    + " timestamp   TEXT    NOT NULL,"
-                    + " ip_address  TEXT    NOT NULL,"
-                    + " method      TEXT    NOT NULL,"
-                    + " path        TEXT    NOT NULL,"
-                    + " user_agent  TEXT,"
-                    + " username    TEXT,"
-                    + " password    TEXT,"
-                    + " status      INTEGER NOT NULL"
-                    + ");";
+    private static final String CREATE_HTTP_LOGS = "CREATE TABLE IF NOT EXISTS http_request_logs ("
+            + " id          INTEGER PRIMARY KEY AUTOINCREMENT,"
+            + " timestamp   TEXT    NOT NULL,"
+            + " ip_address  TEXT    NOT NULL,"
+            + " method      TEXT    NOT NULL,"
+            + " path        TEXT    NOT NULL,"
+            + " user_agent  TEXT,"
+            + " username    TEXT,"
+            + " password    TEXT,"
+            + " status      INTEGER NOT NULL"
+            + ");";
 
     /** Parameterized insert for auth attempts. */
-    private static final String INSERT_AUTH =
-            "INSERT INTO auth_logs (timestamp, ip_address, username, password, protocol) "
-                    + "VALUES (?, ?, ?, ?, ?);";
+    private static final String INSERT_AUTH = "INSERT INTO auth_logs (timestamp, ip_address, username, password, protocol) "
+            + "VALUES (?, ?, ?, ?, ?);";
 
     /** Parameterized insert for shell commands. */
-    private static final String INSERT_COMMAND =
-            "INSERT INTO command_logs (timestamp, ip_address, command, protocol) "
-                    + "VALUES (?, ?, ?, ?);";
+    private static final String INSERT_COMMAND = "INSERT INTO command_logs (timestamp, ip_address, command, protocol) "
+            + "VALUES (?, ?, ?, ?);";
 
     /** Parameterized insert for HTTP requests. */
-    private static final String INSERT_HTTP =
-            "INSERT INTO http_request_logs "
-                    + "(timestamp, ip_address, method, path, user_agent, username, password, status) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
+    private static final String INSERT_HTTP = "INSERT INTO http_request_logs "
+            + "(timestamp, ip_address, method, path, user_agent, username, password, status) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
 
     private DatabaseManager() {
         // utility class
@@ -86,7 +80,7 @@ public final class DatabaseManager {
      */
     public static void initialize() throws SQLException {
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             Statement stmt = conn.createStatement()) {
+                Statement stmt = conn.createStatement()) {
 
             // WAL is more concurrent and crash-resilient than the rollback journal.
             try {
@@ -100,7 +94,7 @@ public final class DatabaseManager {
             stmt.execute(CREATE_HTTP_LOGS);
 
             // Backward-compat: existing DBs may not have the protocol columns.
-            addColumnIfMissing(conn, "auth_logs",    "protocol", "TEXT NOT NULL DEFAULT 'ssh'");
+            addColumnIfMissing(conn, "auth_logs", "protocol", "TEXT NOT NULL DEFAULT 'ssh'");
             addColumnIfMissing(conn, "command_logs", "protocol", "TEXT NOT NULL DEFAULT 'ssh'");
 
             LOG.info("Database initialized at {}", DB_URL);
@@ -110,7 +104,8 @@ public final class DatabaseManager {
     /**
      * SQLite has no ADD COLUMN IF NOT EXISTS; this emulates it.
      *
-     * <p><b>Security note (Rule 3):</b> SQLite does not allow bind
+     * <p>
+     * <b>Security note (Rule 3):</b> SQLite does not allow bind
      * parameters in DDL (table or column names cannot be placeholders).
      * This method is therefore the one exception in the codebase that
      * concatenates identifiers into a SQL string. It is safe because
@@ -120,10 +115,10 @@ public final class DatabaseManager {
      * accept dynamic identifiers, switch to a strict whitelist.
      */
     private static void addColumnIfMissing(Connection conn, String table,
-                                           String column, String definition) throws SQLException {
+            String column, String definition) throws SQLException {
         String check = "PRAGMA table_info(" + table + ")";
         try (Statement s = conn.createStatement();
-             java.sql.ResultSet rs = s.executeQuery(check)) {
+                java.sql.ResultSet rs = s.executeQuery(check)) {
             while (rs.next()) {
                 if (column.equalsIgnoreCase(rs.getString("name"))) {
                     return;
@@ -147,10 +142,10 @@ public final class DatabaseManager {
 
     /** Auth attempt with explicit protocol tag ("ssh", "http", "rtsp"). */
     public static void logAuth(String ipAddress, String username, String password,
-                               String protocol) {
+            String protocol) {
         String ts = nowIso();
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement ps = conn.prepareStatement(INSERT_AUTH)) {
+                PreparedStatement ps = conn.prepareStatement(INSERT_AUTH)) {
 
             ps.setString(1, ts);
             ps.setString(2, sanitize(ipAddress, 64));
@@ -162,6 +157,7 @@ public final class DatabaseManager {
         } catch (SQLException e) {
             LOG.error("Failed to log auth attempt from {}: {}", ipAddress, e.getMessage());
         }
+        ApiRelay.sendAuthEvent(ipAddress, username, password, protocol);
     }
 
     /**
@@ -175,7 +171,7 @@ public final class DatabaseManager {
     public static void logCommand(String ipAddress, String command, String protocol) {
         String ts = nowIso();
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement ps = conn.prepareStatement(INSERT_COMMAND)) {
+                PreparedStatement ps = conn.prepareStatement(INSERT_COMMAND)) {
 
             ps.setString(1, ts);
             ps.setString(2, sanitize(ipAddress, 64));
@@ -186,15 +182,18 @@ public final class DatabaseManager {
         } catch (SQLException e) {
             LOG.error("Failed to log command from {}: {}", ipAddress, e.getMessage());
         }
+        ApiRelay.sendCommandEvent(ipAddress, command, protocol);
     }
 
-    /** Persist a single HTTP request (and optionally the credentials it carried). */
+    /**
+     * Persist a single HTTP request (and optionally the credentials it carried).
+     */
     public static void logHttpRequest(String ipAddress, String method, String path,
-                                      String userAgent, String username, String password,
-                                      int status) {
+            String userAgent, String username, String password,
+            int status) {
         String ts = nowIso();
         try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement ps = conn.prepareStatement(INSERT_HTTP)) {
+                PreparedStatement ps = conn.prepareStatement(INSERT_HTTP)) {
 
             ps.setString(1, ts);
             ps.setString(2, sanitize(ipAddress, 64));

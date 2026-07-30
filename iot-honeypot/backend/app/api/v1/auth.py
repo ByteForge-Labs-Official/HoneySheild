@@ -1,9 +1,9 @@
 """Auth routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.apideps.auth import get_current_user
+from app.api.deps.auth import get_current_user
 from app.db.session import DbSession
 from app.schemas.auth import LoginIn, RefreshIn, RegisterIn, TokenOut
 from app.services.auth_service import AuthService
@@ -32,5 +32,5 @@ async def register(payload: RegisterIn, session: DbSession) -> TokenOut:
 
 
 @router.get("/me", summary="Current authenticated user")
-async def me(user: dict = get_current_user) -> dict:
+async def me(user: dict = Depends(get_current_user)) -> dict:
     return {k: v for k, v in user.items() if k != "hashed_password"}

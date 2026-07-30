@@ -117,3 +117,5 @@ class RolePermission(Base):
         ForeignKey("permissions.id", ondelete="CASCADE"),
         primary_key=True,
     )
+
+    role: Mapped[Role] = relationship(back_populates="permissions")

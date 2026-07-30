@@ -1,7 +1,10 @@
 import { motion } from 'framer-motion';
 import {
+  ArrowDown,
+  ArrowUp,
   Cpu,
   ExternalLink,
+  Filter,
   Power,
   PowerOff,
   RefreshCw,
@@ -98,6 +101,25 @@ export function HoneypotManagement() {
   const [local, setLocal] = useState<Honeypot[]>(mockList);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | Honeypot['status']>('all');
+  const [sortKey, setSortKey] = useState<'name' | 'threats' | 'status'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const visible = useMemo(() => {
+    const filtered =
+      statusFilter === 'all' ? local : local.filter((h) => h.status === statusFilter);
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (sortKey === 'threats') {
+        return ((a.threatsToday ?? 0) - (b.threatsToday ?? 0)) * dir;
+      }
+      if (sortKey === 'status') {
+        const order = { Offline: 0, Degraded: 1, Online: 2 } as const;
+        return (order[a.status] - order[b.status]) * dir;
+      }
+      return a.name.localeCompare(b.name) * dir;
+    });
+  }, [local, statusFilter, sortKey, sortDir]);
 
   // Merge backend honeypots into local view.
   useEffect(() => {
@@ -179,8 +201,65 @@ export function HoneypotManagement() {
         </button>
       </div>
 
+      <div className="mb-5 mt-2 flex flex-wrap items-center gap-3">
+        <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+          {(['all', 'Online', 'Degraded', 'Offline'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={
+                'rounded-md px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ' +
+                (statusFilter === s
+                  ? 'bg-[#00BFFF] text-[#03070F] shadow-[0_0_10px_rgba(0,191,255,0.5)]'
+                  : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+              }
+            >
+              <Filter className="mr-1 inline h-3 w-3" />
+              {s}
+            </button>
+          ))}
+        </div>
+        <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+          {(['name', 'threats', 'status'] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => {
+                if (sortKey === k) {
+                  setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+                } else {
+                  setSortKey(k);
+                  setSortDir('asc');
+                }
+              }}
+              className={
+                'inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ' +
+                (sortKey === k
+                  ? 'bg-[#00FF88] text-[#03070F] shadow-[0_0_10px_rgba(0,255,136,0.45)]'
+                  : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+              }
+            >
+              Sort: {k}
+              {sortKey === k &&
+                (sortDir === 'asc' ? (
+                  <ArrowUp className="h-3 w-3" />
+                ) : (
+                  <ArrowDown className="h-3 w-3" />
+                ))}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] uppercase tracking-wider text-[#8A9BB8]">
+          Showing {visible.length} of {local.length} honeypots
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {local.map((h, i) => {
+        {visible.length === 0 ? (
+          <div className="col-span-full rounded-md border border-dashed border-[#1F2A44] bg-[#0B0F19]/40 p-8 text-center text-sm text-[#8A9BB8]">
+            No honeypots match the active filter.
+          </div>
+        ) : (
+          visible.map((h, i) => {
           const t = tone(h.status);
           const liveData =
             h.threatsToday !== undefined && !usingMock ? h.threatsToday : null;
@@ -275,7 +354,8 @@ export function HoneypotManagement() {
               </Card>
             </motion.div>
           );
-        })}
+        })
+        )}
       </div>
     </section>
   );

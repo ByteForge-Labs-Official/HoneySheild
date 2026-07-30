@@ -15,8 +15,8 @@ _bearer = HTTPBearer(auto_error=False, description="JWT access token")
 
 
 async def get_current_user(
+    session: DbSession,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    session: DbSession = Depends(),
 ) -> dict:
     if creds is None or not creds.credentials:
         raise AuthError("Missing bearer token")

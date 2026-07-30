@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 import { Activity, Globe, Network, Server, Shield, TrendingUp } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   attacksPerHour,
   countriesByAttacks,
@@ -25,6 +26,18 @@ import {
   topProtocols,
 } from '../lib/mock-data';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Download, FileBarChart } from 'lucide-react';
+import { useBackend } from '../lib/backend-context';
+import { socApi, type TimelineBucket } from '../lib/soc-api';
+
+type Range = '1h' | '24h' | '7d' | '30d';
+const RANGE_MULTIPLIER: Record<Range, number> = {
+  '1h': 0.25,
+  '24h': 1,
+  '7d': 2.4,
+  '30d': 4.8,
+};
 
 const tooltipStyle = {
   contentStyle: {
@@ -76,6 +89,108 @@ function AnalyticsCard({
 }
 
 export function Analytics() {
+  const [range, setRange] = useState<Range>('24h');
+  const [bucket, setBucket] = useState<'all' | 'attacks' | 'blocked'>('all');
+  const { timeline, geo, analytics, usingMock } = useBackend();
+  const [liveTimeline, setLiveTimeline] = useState<TimelineBucket[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (usingMock) {
+      setLiveTimeline(null);
+      return;
+    }
+    void socApi.fetchAnalyticsTimeline(range).then((data) => {
+      if (!cancelled) setLiveTimeline(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [range, usingMock]);
+
+  const mul = RANGE_MULTIPLIER[range];
+
+  const liveHourData = useMemo(() => {
+    if (!timeline || timeline.length === 0) return null;
+    return timeline.map((b, i) => {
+      const dt = new Date(b.bucket);
+      const hour = Number.isNaN(dt.getTime())
+        ? String(i)
+        : dt.toISOString().slice(5, 16).replace('T', ' ');
+      const attacks = b.count;
+      return {
+        hour,
+        attacks,
+        blocked: Math.round(attacks * 0.62),
+        unique: Math.round(attacks * 0.4),
+      };
+    });
+  }, [timeline]);
+
+  const hourData = useMemo(
+    () =>
+      (liveHourData ?? attacksPerHour).map((d) => ({
+        hour: d.hour,
+        attacks: Math.round(d.attacks * mul),
+        blocked: Math.round(d.blocked * mul),
+        unique: Math.round(d.unique * mul),
+      })),
+    [liveHourData, mul],
+  );
+
+  const portData = useMemo(
+    () => topPorts.map((p) => ({ ...p, count: Math.round(p.count * mul) })),
+    [mul],
+  );
+
+  const liveCountryData = useMemo(() => {
+    if (!geo || geo.length === 0) return null;
+    return geo
+      .filter((g) => g.country)
+      .map((g) => ({ country: g.country, attacks: g.count }))
+      .slice(0, 10);
+  }, [geo]);
+
+  const countryData = useMemo(
+    () =>
+      (liveCountryData ?? countriesByAttacks).map((c) => ({
+        ...c,
+        attacks: Math.round(c.attacks * mul),
+      })),
+    [liveCountryData, mul],
+  );
+
+  const filteredHourData = useMemo(() => {
+    if (bucket === 'attacks') {
+      return hourData.map((d) => ({ ...d, blocked: 0 }));
+    }
+    if (bucket === 'blocked') {
+      return hourData.map((d) => ({ ...d, attacks: 0 }));
+    }
+    return hourData;
+  }, [hourData, bucket]);
+
+  const protocolData = useMemo(
+    () => topProtocols.map((p) => ({ ...p, value: Math.round(p.value * mul) })),
+    [mul],
+  );
+
+  const osData = useMemo(
+    () => osDetected.map((o) => ({ ...o, value: Math.round(o.value * mul) })),
+    [mul],
+  );
+
+  function exportCsv() {
+    const rows = ['hour,attacks,blocked', ...filteredHourData.map((d) => `${d.hour},${d.attacks},${d.blocked}`)];
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `honeyshield-analytics-${range}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section id="analytics" className="container py-12 md:py-16">
       <motion.div
@@ -95,17 +210,62 @@ export function Analytics() {
         <p className="mt-1 text-sm text-[#8A9BB8]">
           Realtime visualizations across protocols, ports, geography and operating systems.
         </p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+            {(['1h', '24h', '7d', '30d'] as Range[]).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={
+                  'rounded-md px-3 py-1 text-xs font-medium transition ' +
+                  (range === r
+                    ? 'bg-[#00BFFF] text-[#03070F] shadow-[0_0_12px_rgba(0,191,255,0.5)]'
+                    : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+                }
+              >
+                {r.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+            {(['all', 'attacks', 'blocked'] as Array<typeof bucket>).map((b) => (
+              <button
+                key={b}
+                onClick={() => setBucket(b)}
+                className={
+                  'rounded-md px-3 py-1 text-xs font-medium capitalize transition ' +
+                  (bucket === b
+                    ? 'bg-[#00FF88] text-[#03070F] shadow-[0_0_12px_rgba(0,255,136,0.45)]'
+                    : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+                }
+              >
+                {b}
+              </button>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" onClick={exportCsv} className="border-[#00BFFF]/40 text-[#00E5FF] hover:bg-[#00BFFF]/10">
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            Export CSV
+          </Button>
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-[#8A9BB8]">
+            <FileBarChart className="h-3.5 w-3.5 text-[#00E5FF]" />
+            <span>
+              Showing data for {range.toUpperCase()} window
+              {analytics && !usingMock ? ' · live' : ' · demo'}
+            </span>
+          </span>
+        </div>
       </motion.div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <AnalyticsCard
           title="Attacks per Hour"
-          description="Last 24h volume vs. blocked attempts"
+          description={`${range.toUpperCase()} volume vs. blocked attempts`}
           icon={Activity}
           delay={0.05}
         >
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={attacksPerHour}>
+            <AreaChart data={filteredHourData}>
               <defs>
                 <linearGradient id="g-attacks" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#00BFFF" stopOpacity={0.6} />
@@ -149,7 +309,7 @@ export function Analytics() {
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={topProtocols}
+                data={protocolData}
                 dataKey="value"
                 nameKey="name"
                 innerRadius={56}
@@ -178,13 +338,13 @@ export function Analytics() {
           delay={0.15}
         >
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={topPorts}>
+            <BarChart data={portData}>
               <CartesianGrid stroke="#1F2A44" strokeDasharray="3 3" />
               <XAxis dataKey="port" stroke="#8A9BB8" fontSize={10} interval={0} angle={-15} dy={6} />
               <YAxis stroke="#8A9BB8" fontSize={11} />
               <Tooltip {...tooltipStyle} />
               <Bar dataKey="count" radius={[6, 6, 0, 0]} animationDuration={1400}>
-                {topPorts.map((_, i) => (
+                {portData.map((_, i) => (
                   <Cell key={i} fill={i % 2 === 0 ? '#00BFFF' : '#00FF88'} />
                 ))}
               </Bar>
@@ -199,7 +359,7 @@ export function Analytics() {
           delay={0.2}
         >
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={countriesByAttacks} layout="vertical">
+            <BarChart data={countryData} layout="vertical">
               <CartesianGrid stroke="#1F2A44" strokeDasharray="3 3" />
               <XAxis type="number" stroke="#8A9BB8" fontSize={11} />
               <YAxis dataKey="country" type="category" stroke="#8A9BB8" fontSize={11} width={100} />
@@ -218,7 +378,7 @@ export function Analytics() {
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={osDetected}
+                data={osData}
                 dataKey="value"
                 nameKey="name"
                 outerRadius={95}
@@ -247,7 +407,7 @@ export function Analytics() {
         >
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
-              data={attacksPerHour.map((d, i) => ({
+              data={filteredHourData.map((d, i) => ({
                 hour: d.hour,
                 unique: d.unique + i * 12,
                 blocked: d.blocked - i * 8,

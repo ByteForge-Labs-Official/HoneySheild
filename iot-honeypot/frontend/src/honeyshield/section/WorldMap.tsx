@@ -44,11 +44,27 @@ type BackendArc = {
 export function WorldMap() {
   const { events: backendEvents, usingMock } = useBackend();
   const [hover, setHover] = useState<AttackEvent | null>(null);
+  const [threatFilter, setThreatFilter] = useState<Record<Threat, boolean>>({
+    critical: true,
+    high: true,
+    medium: true,
+    low: true,
+  });
+  const [protocolFilter, setProtocolFilter] = useState<string | 'all'>('all');
 
-  const events: AttackEvent[] = useMemo(() => {
+  const allProtocols = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of backendEvents ?? []) {
+      const p = (e as unknown as { protocol: string }).protocol;
+      if (p) set.add(p);
+    }
+    return Array.from(set).sort();
+  }, [backendEvents]);
+
+  const allEvents: AttackEvent[] = useMemo(() => {
     if (backendEvents && backendEvents.length > 0) {
       const raw = backendEvents as unknown as BackendArc[];
-      return raw.slice(0, 26).map((e, i) => {
+      return raw.slice(0, 60).map((e, i) => {
         const iso = (e.source_country ?? '').toUpperCase();
         const ll = COUNTRY_LL[iso] ?? [
           Math.random() * 360 - 180,
@@ -81,6 +97,15 @@ export function WorldMap() {
     return initialFeed();
   }, [backendEvents]);
 
+  const events = useMemo(() => {
+    const filtered = allEvents.filter((e) => {
+      if (!threatFilter[e.threat as Threat]) return false;
+      if (protocolFilter !== 'all' && e.protocol !== protocolFilter) return false;
+      return true;
+    });
+    return filtered.slice(0, 26);
+  }, [allEvents, threatFilter, protocolFilter]);
+
   const arcs = useMemo(
     () =>
       events.slice(0, 26).map((e) => ({
@@ -106,11 +131,52 @@ export function WorldMap() {
             : 'Live arcs traced from attackers to the honeypot mesh.'
         }
         right={
-          <div className="flex items-center gap-2">
-            <Badge variant="danger">Critical</Badge>
-            <Badge variant="warning">High</Badge>
-            <Badge variant="default">Medium</Badge>
-            <Badge variant="success">Low</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            {(['critical', 'high', 'medium', 'low'] as Threat[]).map((t) => {
+              const variant = t === 'critical' ? 'danger' : t === 'high' ? 'warning' : t === 'medium' ? 'default' : 'success';
+              return (
+                <label
+                  key={t}
+                  className={
+                    'inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider transition ' +
+                    (threatFilter[t]
+                      ? variant === 'danger'
+                        ? 'border-[#FF3D6E]/60 bg-[#FF3D6E]/10 text-[#FF3D6E]'
+                        : variant === 'warning'
+                          ? 'border-orange-500/60 bg-orange-500/10 text-orange-300'
+                          : variant === 'success'
+                            ? 'border-[#00FF88]/60 bg-[#00FF88]/10 text-[#00FF88]'
+                            : 'border-[#00BFFF]/60 bg-[#00BFFF]/10 text-[#00E5FF]'
+                      : 'border-[#1F2A44] bg-[#0B0F19] text-[#8A9BB8] opacity-60 hover:opacity-100')
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={threatFilter[t]}
+                    onChange={(e) =>
+                      setThreatFilter((prev) => ({ ...prev, [t]: e.target.checked }))
+                    }
+                  />
+                  <Badge variant={variant}>{t}</Badge>
+                </label>
+              );
+            })}
+            {allProtocols.length > 0 && (
+              <select
+                value={protocolFilter}
+                onChange={(e) => setProtocolFilter(e.target.value)}
+                className="rounded-md border border-[#1F2A44] bg-[#0B0F19] px-2 py-1 text-[10px] uppercase tracking-wider text-[#E6F1FF] focus:border-[#00BFFF]/60 focus:outline-none"
+                aria-label="Protocol filter"
+              >
+                <option value="all">All protocols</option>
+                {allProtocols.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         }
       />

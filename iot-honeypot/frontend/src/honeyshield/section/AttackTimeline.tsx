@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
-import { AlertTriangle, Clock, MapPin, ShieldAlert, Zap } from 'lucide-react';
-import { useMemo } from 'react';
+import { AlertTriangle, Clock, Filter, MapPin, ShieldAlert, Zap } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { timelineEvents as mockTimeline } from '../lib/mock-data';
 import { Badge } from '../components/ui/badge';
 import { Card } from '../components/ui/card';
@@ -60,6 +60,7 @@ type BackendEventRaw = {
 
 export function AttackTimeline() {
   const { alerts, events, usingMock } = useBackend();
+  const [severityFilter, setSeverityFilter] = useState<'all' | Item['severity']>('all');
 
   const items: Item[] = useMemo(() => {
     if (alerts && alerts.length > 0) {
@@ -106,6 +107,14 @@ export function AttackTimeline() {
     }));
   }, [alerts, events]);
 
+  const filteredItems = useMemo(
+    () =>
+      severityFilter === 'all'
+        ? items
+        : items.filter((it) => it.severity === severityFilter),
+    [items, severityFilter],
+  );
+
   return (
     <section id="timeline" className="container py-12 md:py-16">
       <div className="mb-6 flex items-end justify-between gap-4">
@@ -122,13 +131,30 @@ export function AttackTimeline() {
               : 'Live alerts and notable events surfaced from the backend.'}
           </p>
         </div>
+        <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+          {(['all', 'critical', 'high', 'medium', 'low'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSeverityFilter(s)}
+              className={
+                'inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ' +
+                (severityFilter === s
+                  ? 'bg-[#00BFFF] text-[#03070F] shadow-[0_0_10px_rgba(0,191,255,0.5)]'
+                  : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+              }
+            >
+              <Filter className="h-3 w-3" />
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
 
       <Card className="p-6 md:p-8">
         <div className="relative ml-4">
           <div className="absolute left-[7px] top-2 bottom-2 w-px bg-gradient-to-b from-[#00BFFF] via-[#00BFFF]/40 to-transparent" />
           <ol className="space-y-6">
-            {items.map((item, i) => (
+            {filteredItems.map((item, i) => (
               <motion.li
                 key={item.id}
                 initial={{ opacity: 0, x: -16 }}
@@ -167,9 +193,11 @@ export function AttackTimeline() {
               </motion.li>
             ))}
           </ol>
-          {items.length === 0 && (
+          {filteredItems.length === 0 && (
             <div className="grid place-items-center py-16 text-sm text-[#8A9BB8]">
-              No incidents captured yet — the mesh is quiet.
+              {items.length === 0
+                ? 'No incidents captured yet — the mesh is quiet.'
+                : `No incidents match the ${severityFilter} severity filter.`}
             </div>
           )}
         </div>

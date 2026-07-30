@@ -6,7 +6,7 @@ import BugReportIcon from '@mui/icons-material/BugReport';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { fetchStats, attacksActions } from '@/store/slices/attacksSlice';
+import { fetchAttacks, fetchStats, attacksActions } from '@/store/slices/attacksSlice';
 import { fetchAlerts } from '@/store/slices/alertsSlice';
 import { generateDemoStats } from '@/utils/demoData';
 import { StatCard } from '@/components/common/StatCard';
@@ -28,12 +28,19 @@ export const DashboardPage: React.FC = () => {
   const alerts = useAppSelector((s) => s.alerts.items).slice(0, 5);
 
   useEffect(() => {
-    dispatch(fetchStats()).catch(() => {
-      if (DEMO_MODE) {
-        dispatch(attacksActions.setStats(generateDemoStats()));
-      }
-    });
-    dispatch(fetchAlerts()).catch(() => {});
+    const loadData = () => {
+      dispatch(fetchStats()).catch(() => {
+        if (DEMO_MODE) {
+          dispatch(attacksActions.setStats(generateDemoStats()));
+        }
+      });
+      dispatch(fetchAttacks()).catch(() => {});
+      dispatch(fetchAlerts()).catch(() => {});
+    };
+
+    loadData();
+    const timer = setInterval(loadData, 3000);
+    return () => clearInterval(timer);
   }, [dispatch]);
 
   // Demo fallback: seed stats from local generator when no real data

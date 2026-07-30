@@ -81,7 +81,24 @@ export function Hero({
         >
           <div className="absolute inset-0 -z-10 rounded-full bg-[radial-gradient(circle,rgba(0,229,255,0.35),transparent_60%)] blur-3xl" />
           <div className="circuit-bg absolute inset-0 -z-10 rounded-2xl opacity-50" />
-          <ShieldMark size={280} />
+          <motion.div
+            className="absolute h-[320px] w-[320px] rounded-full border border-[#00BFFF]/30"
+            animate={{ rotate: 360 }}
+            transition={{ duration: 22, repeat: Infinity, ease: 'linear' }}
+            style={{ borderTopColor: '#00E5FF', borderRightColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: 'transparent' }}
+          />
+          <motion.div
+            className="absolute h-[360px] w-[360px] rounded-full border border-[#00FF88]/15"
+            animate={{ rotate: -360 }}
+            transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
+            style={{ borderTopColor: 'transparent', borderRightColor: '#00FF88', borderBottomColor: 'transparent', borderLeftColor: 'transparent' }}
+          />
+          <motion.div
+            animate={{ y: [0, -6, 0] }}
+            transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <ShieldMark size={280} />
+          </motion.div>
         </motion.div>
       </div>
     </section>

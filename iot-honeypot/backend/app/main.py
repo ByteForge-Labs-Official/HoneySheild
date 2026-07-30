@@ -24,7 +24,7 @@ from app.integrations.redis.client import get_redis
 from app.services.health import aggregate_health
 
 settings = get_settings()
-configure_logging(settings.log_level)
+configure_logging(level=settings.log_level)
 
 
 @asynccontextmanager

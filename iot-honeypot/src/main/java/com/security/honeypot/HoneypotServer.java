@@ -270,8 +270,8 @@ public final class HoneypotServer {
         // "EdDSA Signer not available"). RSA is also much more realistic for an
         // old IoT device (our honeypot profile).
         try {
-            org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider keyProvider =
-                new org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider(Path.of(HOST_KEY_PATH));
+            org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider keyProvider = new org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider(
+                    Path.of(HOST_KEY_PATH));
             keyProvider.setAlgorithm("RSA");
             keyProvider.setKeySize(2048);
             server.setKeyPairProvider(keyProvider);
@@ -299,54 +299,7 @@ public final class HoneypotServer {
             return true;
         });
 
-        // Same bait posture for keyboard-interactive (used by many IoT bots).
-        // KeyboardInteractiveAuthenticator in 2.12.0 declares two abstract
-        // methods (generateChallenge + authenticate), so it cannot be a
-        // lambda — we use an anonymous class instead.
-        server.setKeyboardInteractiveAuthenticator(
-                new org.apache.sshd.server.auth.keyboard.KeyboardInteractiveAuthenticator() {
-                    @Override
-                    public org.apache.sshd.server.auth.keyboard.InteractiveChallenge generateChallenge(
-                            org.apache.sshd.server.session.ServerSession session,
-                            String username, String lang, String subMethods)
-                            throws Exception {
-                        // No interactive challenge is needed — we accept
-                        // everything the attacker types, so the response
-                        // to the challenge is an empty prompt list.
-                        return new org.apache.sshd.server.auth.keyboard.InteractiveChallenge() {
-                            @Override
-                            public String getInteractionName() {
-                                return "";
-                            }
-
-                            @Override
-                            public String getInteractionInstruction() {
-                                return "";
-                            }
-
-                            @Override
-                            public String getLanguageTag() {
-                                return "en";
-                            }
-
-                            @Override
-                            public java.util.List<org.apache.sshd.server.auth.keyboard.PromptEntry> getPrompts() {
-                                return java.util.Collections.emptyList();
-                            }
-                        };
-                    }
-
-                    @Override
-                    public boolean authenticate(org.apache.sshd.server.session.ServerSession session,
-                            String username,
-                            java.util.List<String> responses)
-                            throws Exception {
-                        String ip = remoteIp(session);
-                        LOG.info("KEYBOARD-INTERACTIVE ATTEMPT ip={} user='{}'", ip, username);
-                        DatabaseManager.logAuth(ip, username, String.join(",", responses));
-                        return true;
-                    }
-                });
+        server.setKeyboardInteractiveAuthenticator(null);
 
         // Wire the fake shell.
         server.setShellFactory(new FakeShellFactory());
@@ -379,8 +332,7 @@ public final class HoneypotServer {
             SERVICES.add(http::stop);
             LOG.info("HTTP honeypot listening on {}:{} ({})", BIND_ADDRESS, HTTP_PORT, profile);
         } catch (Exception e) {
-            LOG.error("Failed to start HTTP honeypot.", e);
-            System.exit(1);
+            LOG.warn("HTTP honeypot port {} unavailable ({}); continuing with SSH.", HTTP_PORT, e.getMessage());
         }
     }
 
@@ -391,8 +343,7 @@ public final class HoneypotServer {
             SERVICES.add(rtsp::stop);
             LOG.info("RTSP stub listening on {}:{}", BIND_ADDRESS, RTSP_PORT);
         } catch (Exception e) {
-            LOG.error("Failed to start RTSP stub.", e);
-            System.exit(1);
+            LOG.warn("RTSP honeypot port {} unavailable ({}); continuing with SSH.", RTSP_PORT, e.getMessage());
         }
     }
 

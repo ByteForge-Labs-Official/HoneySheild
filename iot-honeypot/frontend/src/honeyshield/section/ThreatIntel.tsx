@@ -1,7 +1,9 @@
 import { motion } from 'framer-motion';
-import { Bot, Bug, ExternalLink, ShieldAlert, Skull, Target } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, Bug, ExternalLink, ShieldAlert, Skull, Target } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { malwareFamilies, mitre, recentCVEs, severityColor, type Severity } from '../lib/mock-data';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Progress } from '../components/ui/progress';
 import { SectionHeader } from '../components/fx/SectionHeader';
@@ -93,7 +95,33 @@ function CVECard({ cve, index }: { cve: (typeof recentCVEs)[number]; index: numb
 }
 
 export function ThreatIntel() {
-  const totalMitre = mitre.reduce((s, m) => s + m.count, 0);
+  const [severityFilter, setSeverityFilter] = useState<'all' | Severity>('all');
+  const [cveSort, setCveSort] = useState<'desc' | 'asc'>('desc');
+  const [cveExploitedOnly, setCveExploitedOnly] = useState(false);
+  const [mitreSort, setMitreSort] = useState<'desc' | 'asc'>('desc');
+
+  const filteredMalware = useMemo(
+    () =>
+      severityFilter === 'all'
+        ? malwareFamilies
+        : malwareFamilies.filter((m) => m.severity === severityFilter),
+    [severityFilter],
+  );
+
+  const sortedCVEs = useMemo(() => {
+    const list = cveExploitedOnly ? recentCVEs.filter((c) => c.exploited) : recentCVEs;
+    return [...list].sort((a, b) => (cveSort === 'desc' ? b.cvss - a.cvss : a.cvss - b.cvss));
+  }, [cveSort, cveExploitedOnly]);
+
+  const sortedMitre = useMemo(
+    () => [...mitre].sort((a, b) => (mitreSort === 'desc' ? b.count - a.count : a.count - b.count)),
+    [mitreSort],
+  );
+
+  const totalMitre = sortedMitre.reduce((s, m) => s + m.count, 0);
+
+  const severityOptions: Array<'all' | Severity> = ['all', 'critical', 'high', 'medium', 'low'];
+
   return (
     <section id="intel" className="container py-12 md:py-16">
       <SectionHeader
@@ -104,13 +132,35 @@ export function ThreatIntel() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#8A9BB8]">
-            <Bug className="h-3.5 w-3.5 text-[#FF3D6E]" /> Latest Malware Families
-          </h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#8A9BB8]">
+              <Bug className="h-3.5 w-3.5 text-[#FF3D6E]" /> Latest Malware Families
+            </h3>
+            <div className="inline-flex items-center gap-1 rounded-lg border border-[#1F2A44] bg-[#0B0F19] p-1">
+              {severityOptions.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSeverityFilter(s)}
+                  className={
+                    'rounded-md px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ' +
+                    (severityFilter === s
+                      ? 'bg-[#00BFFF] text-[#03070F] shadow-[0_0_10px_rgba(0,191,255,0.5)]'
+                      : 'text-[#8A9BB8] hover:text-[#E6F1FF]')
+                  }
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {malwareFamilies.map((m, i) => (
-              <MalwareCard key={m.name} m={m} index={i} />
-            ))}
+            {filteredMalware.length === 0 ? (
+              <div className="col-span-full rounded-md border border-dashed border-[#1F2A44] bg-[#0B0F19]/40 p-6 text-center text-xs text-[#8A9BB8]">
+                No malware families match the {severityFilter} severity filter.
+              </div>
+            ) : (
+              filteredMalware.map((m, i) => <MalwareCard key={m.name} m={m} index={i} />)
+            )}
           </div>
         </div>
 
@@ -146,23 +196,70 @@ export function ThreatIntel() {
 
       <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#8A9BB8]">
-            <ShieldAlert className="h-3.5 w-3.5 text-[#00BFFF]" /> Top Exploited CVEs
-          </h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#8A9BB8]">
+              <ShieldAlert className="h-3.5 w-3.5 text-[#00BFFF]" /> Top Exploited CVEs
+            </h3>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCveExploitedOnly((v) => !v)}
+                className={
+                  'border-[#FF3D6E]/40 text-xs ' +
+                  (cveExploitedOnly ? 'bg-[#FF3D6E]/15 text-[#FF3D6E]' : 'text-[#8A9BB8]')
+                }
+              >
+                {cveExploitedOnly ? 'Exploited only ✓' : 'Show exploited only'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCveSort((v) => (v === 'desc' ? 'asc' : 'desc'))}
+                className="border-[#00BFFF]/40 text-xs text-[#00E5FF]"
+              >
+                {cveSort === 'desc' ? (
+                  <ArrowDown className="mr-1 h-3 w-3" />
+                ) : (
+                  <ArrowUp className="mr-1 h-3 w-3" />
+                )}
+                CVSS {cveSort === 'desc' ? 'high→low' : 'low→high'}
+              </Button>
+            </div>
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {recentCVEs.map((c, i) => (
-              <CVECard key={c.id} cve={c} index={i} />
-            ))}
+            {sortedCVEs.length === 0 ? (
+              <div className="col-span-full rounded-md border border-dashed border-[#1F2A44] bg-[#0B0F19]/40 p-6 text-center text-xs text-[#8A9BB8]">
+                No CVEs match the active filter.
+              </div>
+            ) : (
+              sortedCVEs.map((c, i) => <CVECard key={c.id} cve={c} index={i} />)
+            )}
           </div>
         </div>
 
         <div>
-          <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#8A9BB8]">
-            <Target className="h-3.5 w-3.5 text-[#00E5FF]" /> MITRE ATT&CK
-          </h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[#8A9BB8]">
+              <Target className="h-3.5 w-3.5 text-[#00E5FF]" /> MITRE ATT&CK
+            </h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setMitreSort((v) => (v === 'desc' ? 'asc' : 'desc'))}
+              className="border-[#00BFFF]/40 text-[10px] text-[#00E5FF]"
+            >
+              {mitreSort === 'desc' ? (
+                <ArrowDown className="mr-1 h-3 w-3" />
+              ) : (
+                <ArrowUp className="mr-1 h-3 w-3" />
+              )}
+              Count
+            </Button>
+          </div>
           <Card className="p-0">
             <ul className="divide-y divide-[#1F2A44]">
-              {mitre.map((m) => {
+              {sortedMitre.map((m) => {
                 const pct = Math.round((m.count / totalMitre) * 100);
                 return (
                   <li key={m.id} className="flex items-center gap-3 px-4 py-3">
