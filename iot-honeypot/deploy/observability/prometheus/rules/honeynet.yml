@@ -1,0 +1,65 @@
+# ============================================================================
+# Prometheus alert rules for the Honeynet stack.
+# ============================================================================
+groups:
+  - name: honeynet.core
+    interval: 30s
+    rules:
+      - alert: HoneypotDown
+        expr: up{job=~"blackbox_ssh|relay"} == 0
+        for: 2m
+        labels: { severity: critical, tier: security }
+        annotations:
+          summary: 'Honeypot surface unreachable'
+          description: 'The SSH banner probe or its side-car relay has been down for 2 minutes.'
+
+      - alert: RelayBacklog
+        expr: relay_ingest_lag_seconds > 60
+        for: 5m
+        labels: { severity: warning, tier: ingest }
+        annotations:
+          summary: 'Relay is more than a minute behind'
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 30s
+        labels: { severity: critical, tier: database }
+        annotations:
+          summary: 'Postgres unreachable'
+
+      - alert: PostgresHighConnections
+        expr: pg_stat_activity_count > 160
+        for: 5m
+        labels: { severity: warning, tier: database }
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 30s
+        labels: { severity: critical, tier: ingest }
+
+      - alert: CaddyHighErrorRate
+        expr: |
+          sum(rate(caddy_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(caddy_http_requests_total[5m])) > 0.05
+        for: 10m
+        labels: { severity: warning, tier: edge }
+
+      - alert: HostDiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs"}
+            / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs"}) * 100 < 15
+        for: 10m
+        labels: { severity: warning, tier: host }
+
+      - alert: HostCpuSaturated
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels: { severity: warning, tier: host }
+
+      - alert: AttackSurge
+        expr: sum(rate(relay_events_shipped_total[1m])) > 50
+        for: 5m
+        labels: { severity: critical, tier: security }
+        annotations:
+          summary: 'Sustained attack surge (> 50 events/s) — check dashboard.'

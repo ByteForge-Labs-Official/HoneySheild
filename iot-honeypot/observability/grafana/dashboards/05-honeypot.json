@@ -1,0 +1,98 @@
+{
+  "title": "Honeynet — Honeypots (Domain)",
+  "uid": "honeynet-domain",
+  "schemaVersion": 39,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "tags": ["honeynet", "honeypot"],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "protocol",
+        "label": "Protocol",
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "query": "label_values(honeypot_unauth_attempts_total, protocol)",
+        "includeAll": true,
+        "multi": true
+      },
+      {
+        "type": "query",
+        "name": "source_country",
+        "label": "Country",
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "query": "label_values(honeypot_unauth_attempts_total, source_country)",
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Unauthorised attempts by protocol",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (protocol) (rate(honeypot_unauth_attempts_total{protocol=~\"$protocol\"}[5m]))",
+          "legendFormat": "{{protocol}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Top source countries (heatmap of rate)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (source_country) (rate(honeypot_unauth_attempts_total{source_country=~\"$source_country\"}[5m]))",
+          "legendFormat": "{{source_country}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Active bait sessions",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "honeypot_connections_active{protocol=~\"$protocol\"}",
+          "legendFormat": "{{protocol}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ingested bytes by protocol",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "rate(honeypot_payloads_bytes_total{protocol=~\"$protocol\"}[5m])",
+          "legendFormat": "{{protocol}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Suricata alerts / minute",
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (signature, severity) (rate(ids_suricata_alerts_total[5m]) * 60)",
+          "legendFormat": "{{severity}} – {{signature}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "MITRE tags seen (last 24h)",
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 4 },
+      "targets": [
+        {
+          "expr": "count(count_over_time(mitre_tag_total[24h]) > 0) or vector(0)"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+groups:
+  - name: host.cpu
+    interval: 30s
+    rules:
+      - alert: HostHighCpuUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+            > 85
+        for: 5m
+        labels:
+          severity: warning
+          tier: host
+        annotations:
+          summary: "Host {{ $labels.instance }} CPU > 85 % for 5 m"
+          description: "Sustained CPU usage {{ $value | printf \"%.1f\" }} % on {{ $labels.instance }}."
+          runbook_url: "https://honeynet.local/docs/runbook/alerts/HostHighCpuUsage.md"
+
+      - alert: HostCpuThrottling
+        expr: rate(node_cpu_core_throttles_total[5m]) > 0
+        for: 10m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "CPU throttling active on {{ $labels.instance }}"
+          description: "Container(s) hitting cgroup CPU quota. Inspect docker stats."
+
+      - alert: HostLoadHigh
+        expr: |
+          node_load5 > (count without(cpu, mode)(node_cpu_seconds_total{mode="idle"}) * 2)
+        for: 10m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "5-minute load on {{ $labels.instance }} > 2× ncpu"
+
+  - name: host.memory
+    rules:
+      - alert: HostLowMemory
+        expr: |
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 15
+        for: 5m
+        labels: { severity: critical, tier: host }
+        annotations:
+          summary: "Memory available < 15 % on {{ $labels.instance }}"
+
+      - alert: HostMemoryPressure
+        expr: rate(node_vmstat_pgpgin[5m]) > 1000
+        for: 10m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "Sustained paging on {{ $labels.instance }}"
+
+      - alert: HostSwapInUse
+        expr: rate(node_vmstat_pswpin[5m]) > 0
+        for: 5m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "Swap-in detected on {{ $labels.instance }}"
+
+  - name: host.disk
+    rules:
+      - alert: HostDiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint!~"/boot.*|/snap.*"} / node_filesystem_size_bytes) * 100
+          < 15
+        for: 10m
+        labels: { severity: critical, tier: host }
+        annotations:
+          summary: "Disk < 15 % free on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+
+      - alert: HostDiskWillFillIn6h
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{mountpoint!~"/boot.*"}[6h], 6 * 3600) < 0
+        for: 30m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "Disk on {{ $labels.mountpoint }} ({{ $labels.instance }}) will fill in 6 h"
+
+      - alert: HostDiskInodesLow
+        expr: |
+          (node_filesystem_files_free{mountpoint!~"/boot.*"} / node_filesystem_files) * 100 < 10
+        for: 30m
+        labels: { severity: warning, tier: host }
+
+      - alert: HostDiskIoSaturation
+        expr: |
+          (rate(node_disk_io_time_seconds_total[5m]) / count by (instance)(node_disk_io_time_seconds_total))
+          > 0.7
+        for: 10m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "Disk I/O saturated on {{ $labels.instance }}"
+
+      - alert: HostFilesystemReadOnly
+        expr: node_filesystem_readonly == 1
+        for: 1m
+        labels: { severity: critical, tier: host }
+        annotations:
+          summary: "Filesystem on {{ $labels.instance }} remounted read-only"
+
+  - name: host.network
+    rules:
+      - alert: HostNicErrorsRising
+        expr: rate(node_network_receive_errs_total[5m]) > 10
+        for: 10m
+        labels: { severity: warning, tier: host }
+
+      - alert: HostSaturatedDrops
+        expr: rate(node_network_drop_in_total[5m]) > 100
+        for: 10m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "Kernel is dropping incoming packets on {{ $labels.instance }}"
+
+      - alert: HostTcpEstablishedHigh
+        expr: node_netstat_Tcp_CurrEstab > 50000
+        for: 5m
+        labels: { severity: warning, tier: host }
+        annotations:
+          summary: "Established TCP connections > 50 k on {{ $labels.instance }}"
+
+      - alert: HostTcpOrphanAccumulation
+        expr: node_sockstat_TCP_orphan > 1000
+        for: 10m
+        labels: { severity: warning, tier: host }

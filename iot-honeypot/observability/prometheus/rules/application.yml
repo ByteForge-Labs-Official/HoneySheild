@@ -1,0 +1,68 @@
+groups:
+  # SLO alert — 99 % of requests should succeed in < 500 ms
+  - name: api.slo
+    rules:
+      - alert: ApiHighErrorRate
+        expr: |
+          (sum by (handler) (rate(http_requests_total{status_code=~"5..|4.."}[5m])))
+            / (sum by (handler) (rate(http_requests_total[5m]))) * 100 > 5
+        for: 5m
+        labels: { severity: critical, tier: api }
+        annotations:
+          summary: "Error rate > 5 % on {{ $labels.handler }}"
+
+      - alert: ApiP99LatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum by (handler, le) (rate(http_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: { severity: warning, tier: api }
+        annotations:
+          summary: "p99 latency > 1 s on {{ $labels.handler }}"
+
+      - alert: ApiInProgressHigh
+        expr: http_requests_inprogress > 500
+        for: 5m
+        labels: { severity: warning, tier: api }
+
+  - name: app.liveness
+    rules:
+      - alert: AppDependencyDown
+        expr: app_dependency_up == 0
+        for: 2m
+        labels: { severity: critical, tier: app }
+        annotations:
+          summary: "App dependency {{ $labels.dep }} is reporting down"
+
+      - alert: AppExceptionSpike
+        expr: |
+          sum(rate(http_exceptions_total[5m])) > 1
+        for: 5m
+        labels: { severity: warning, tier: app }
+
+      - alert: AppCeleryFailureSpike
+        expr: |
+          sum(rate(app_celery_tasks_total{status="failed"}[5m]))
+            / sum(rate(app_celery_tasks_total[5m])) * 100 > 10
+        for: 10m
+        labels: { severity: warning, tier: app }
+
+  - name: app.ai
+    rules:
+      - alert: AiProviderError
+        expr: |
+          sum(rate(app_ai_insights_total{status="error"}[5m]))
+            / sum(rate(app_ai_insights_total[5m])) * 100 > 25
+        for: 10m
+        labels: { severity: warning, tier: ai }
+        annotations:
+          summary: "AI provider {{ $labels.provider }} error-rate > 25 %"
+
+      - alert: AiSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (provider, le) (rate(ai_enrichment_duration_seconds_bucket[10m]))) > 8
+        for: 10m
+        labels: { severity: warning, tier: ai }
+        annotations:
+          summary: "AI p95 latency > 8 s for {{ $labels.provider }}"

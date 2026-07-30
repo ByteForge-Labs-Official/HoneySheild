@@ -1,0 +1,113 @@
+{
+  "title": "Honeynet — API & Application",
+  "uid": "honeynet-api",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["honeynet", "api", "app"],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "handler",
+        "label": "Endpoint",
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "query": "label_values(http_requests_total, handler)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Request rate (req/s)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (status_code) (rate(http_requests_total{handler=~\"$handler\"}[5m]))",
+          "legendFormat": "HTTP {{status_code}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency percentiles (s)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (handler, le) (rate(http_request_duration_seconds_bucket{handler=~\"$handler\"}[5m])))",
+          "legendFormat": "p50 {{handler}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (handler, le) (rate(http_request_duration_seconds_bucket{handler=~\"$handler\"}[5m])))",
+          "legendFormat": "p95 {{handler}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (handler, le) (rate(http_request_duration_seconds_bucket{handler=~\"$handler\"}[5m])))",
+          "legendFormat": "p99 {{handler}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate (% by handler)",
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "(sum by (handler) (rate(http_requests_total{status_code=~\"5..\"}[5m])) / sum by (handler) (rate(http_requests_total[5m]))) * 100",
+          "legendFormat": "5xx % {{handler}}"
+        },
+        {
+          "expr": "(sum by (handler) (rate(http_requests_total{status_code=~\"4xx\"}[5m])) / sum by (handler) (rate(http_requests_total[5m]))) * 100",
+          "legendFormat": "4xx % {{handler}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "In-flight requests",
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (handler) (http_requests_inprogress{handler=~\"$handler\"})",
+          "legendFormat": "{{handler}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Celery task outcomes",
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(app_celery_tasks_total[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "AI insights / hour",
+      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(increase(app_ai_insights_total{status=\"success\"}[1h]))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "type": "stat",
+      "title": "Dependencies up",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 3 },
+      "targets": [
+        { "expr": "app_dependency_up", "legendFormat": "{{dep}}" }
+      ]
+    }
+  ]
+}

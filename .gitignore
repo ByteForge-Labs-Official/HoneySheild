@@ -1,0 +1,23 @@
+# AI / Index directories
+.puku/
+.gemini/
+
+# Maven / Java build outputs & logs
+**/target/
+*.jar
+*.class
+*.log
+*.err
+*.ser
+*.db
+
+# Python virtualenvs & caches
+.venv/
+**/__pycache__/
+**/.pytest_cache/
+*.pyc
+
+# Node modules & build artifacts
+**/node_modules/
+**/dist/
+**/build/

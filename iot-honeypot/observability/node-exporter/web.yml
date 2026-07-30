@@ -1,0 +1,4 @@
+# Textfile collector + bind mount used by node-exporter for host-specific
+# textfiles (drives RAID array statuses, dm-cache, etc.).
+textfile:
+  directory: /host/textfile_collector

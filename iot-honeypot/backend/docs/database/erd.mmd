@@ -1,0 +1,435 @@
+---
+title: IoT Honeypot — PostgreSQL Schema (ER Diagram)
+---
+erDiagram
+
+    %% ============================================================
+    %%  IDENTITY & ACCESS CONTROL  (RBAC)
+    %% ============================================================
+    users ||--o{ user_roles       : "has"
+    roles ||--o{ user_roles       : "granted via"
+    users ||--o{ user_roles       : "granted by"
+    roles ||--o{ role_permissions : "has"
+    permissions ||--o{ role_permissions : "granted via"
+
+    users {
+        uuid id PK
+        string email UK
+        string password_hash
+        string full_name
+        bool is_active
+        bool is_superuser
+        timestamptz last_login_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    roles {
+        uuid id PK
+        string name UK
+        string description
+        bool is_system
+        int priority
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    permissions {
+        uuid id PK
+        string code UK
+        string resource
+        string action
+        text description
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    user_roles {
+        uuid user_id PK,FK
+        uuid role_id PK,FK
+        uuid granted_by FK
+        timestamptz granted_at
+    }
+    role_permissions {
+        uuid role_id PK,FK
+        uuid permission_id PK,FK
+    }
+
+    %% ============================================================
+    %%  ASSET INVENTORY
+    %% ============================================================
+    users  ||--o{ devices          : "owns"
+    devices ||--o{ services         : "exposes"
+    honeypots ||--o{ services       : "realises"
+
+    devices {
+        uuid id PK
+        string name
+        string vendor
+        string model
+        string firmware_version
+        string kind
+        macaddr mac_address UK
+        inet primary_ip
+        string[] tags
+        int risk_score "0..100"
+        bool is_active
+        string last_seen_at
+        jsonb metadata
+        uuid owner_user_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    services {
+        uuid id PK
+        uuid device_id FK "nullable"
+        uuid honeypot_id FK "nullable"
+        string name
+        string protocol
+        int port
+        string state
+        string banner
+        string version
+        bool tls
+        text description
+        jsonb config
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    %% ============================================================
+    %%  TELEMETRY  (events, logs, sessions)
+    %% ============================================================
+    devices   ||--o{ events    : "produces"
+    services  ||--o{ events    : "received at"
+    honeypots ||--o{ events    : "captured by"
+    sessions  ||--o{ events    : "groups"
+    logs      ||--o{ events    : "structured into"
+    devices   ||--o{ logs      : "produces"
+    honeypots ||--o{ logs      : "captured by"
+    events    ||--o{ logs      : "summarises"
+    devices   ||--o{ sessions  : "attacked"
+    honeypots ||--o{ sessions  : "captured by"
+
+    sessions {
+        uuid id PK
+        timestamptz started_at
+        timestamptz ended_at
+        string state
+        inet src_ip
+        int src_port
+        string protocol
+        string user_agent
+        bigint bytes_in
+        bigint bytes_out
+        int commands_count
+        bool authenticated
+        string[] mitre_tags
+        uuid device_id FK
+        uuid honeypot_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    events {
+        uuid id PK
+        timestamptz ts
+        string kind
+        int severity "1..5"
+        string protocol
+        inet src_ip
+        int src_port
+        inet dst_ip
+        int dst_port
+        string user_agent
+        string username
+        string password
+        text command
+        bigint payload_size
+        string[] mitre_tags
+        bool success
+        float confidence
+        jsonb extra
+        uuid device_id FK
+        uuid service_id FK
+        uuid honeypot_id FK
+        uuid session_id FK
+        uuid log_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    logs {
+        uuid id PK
+        timestamptz ts
+        string source
+        string level
+        text message
+        jsonb structured
+        uuid device_id FK
+        uuid honeypot_id FK
+        uuid event_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    %% ============================================================
+    %%  THREAT INTELLIGENCE  (intel feeds, malware, IOCs)
+    %% ============================================================
+    threat_intelligence ||--o{ ioc_threat_intel : "linked from"
+    indicators_of_compromise ||--o{ ioc_threat_intel : "linked to"
+    malware_metadata     ||--o{ ioc_malware      : "linked from"
+    indicators_of_compromise ||--o{ ioc_malware  : "linked to"
+
+    threat_intelligence {
+        uuid id PK
+        string source
+        string external_id
+        string title
+        text description
+        timestamptz published_at
+        string tlp "TLP enum"
+        int confidence
+        string severity
+        string[] mitre_tags
+        string[] references
+        jsonb raw
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    malware_metadata {
+        uuid id PK
+        string sha256 UK
+        string sha1
+        string md5
+        string family
+        string malware_type "enum"
+        string[] aliases
+        timestamptz first_seen_at
+        timestamptz last_seen_at
+        string tlp
+        text description
+        jsonb raw
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    indicators_of_compromise {
+        uuid id PK
+        string kind "ip|domain|url|sha256|email|cidr|asn"
+        inet value_inet
+        cidr value_cidr
+        string value_hash
+        string value_domain
+        string value_url
+        string value_email
+        int value_asn
+        string source
+        string confidence
+        timestamptz first_seen_at
+        timestamptz last_seen_at
+        timestamptz expires_at
+        jsonb context
+        text description
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    ioc_threat_intel {
+        uuid ioc_id PK,FK
+        uuid threat_intel_id PK,FK
+        float confidence
+        timestamptz observed_at
+        text note
+    }
+    ioc_malware {
+        uuid ioc_id PK,FK
+        uuid malware_id PK,FK
+        string role "dropper|downloader|payload|exfil|..."
+        text note
+    }
+
+    %% ============================================================
+    %%  NETWORK GRAPH
+    %% ============================================================
+    devices   ||--o{ network_assets : "observed at"
+    network_assets ||--o{ network_asset_relationships : "source"
+    network_assets ||--o{ network_asset_relationships : "destination"
+
+    network_assets {
+        uuid id PK
+        uuid device_id FK
+        inet ip_address
+        cidr subnet
+        macaddr mac_address
+        string hostname
+        string asn
+        string country
+        float latitude
+        float longitude
+        float reputation_score
+        bool is_internal
+        timestamptz since
+        timestamptz until "nullable"
+        jsonb metadata
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    network_asset_relationships {
+        uuid id PK
+        uuid source_id FK
+        uuid destination_id FK
+        string edge_type "connects_to|routes_to|resolves_to"
+        string protocol
+        int port
+        int packet_count
+        bigint bytes
+        timestamptz first_seen_at
+        timestamptz last_seen_at
+        jsonb metadata
+    }
+
+    %% ============================================================
+    %%  ALERTS  (existing) — wired to notifications
+    %% ============================================================
+    users     ||--o{ alerts           : "owner/assignee"
+    honeypots ||--o{ alerts           : "triggered by"
+    alerts    ||--o{ notifications    : "delivered via"
+    users     ||--o{ ai_insights      : "consumer (existing)"
+
+    alerts {
+        uuid id PK
+        string title
+        text description
+        string severity
+        string status
+        string category
+        jsonb payload
+        timestamptz detected_at
+        timestamptz resolved_at
+        uuid assignee_user_id FK
+        uuid honeypot_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    ai_insights {
+        uuid id PK
+        string prompt
+        text response
+        string model
+        jsonb context
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    %% ============================================================
+    %%  REPORTING
+    %% ============================================================
+    users ||--o{ reports : "requested by"
+    reports ||--o{ notifications : "delivered via"
+
+    reports {
+        uuid id PK
+        string title
+        string report_type "executive|technical|threat|incident|ioc"
+        string status "pending|running|completed|failed|expired"
+        timestamptz period_start
+        timestamptz period_end
+        string artifact_uri
+        string artifact_format "pdf|html|json|csv"
+        bigint artifact_size
+        jsonb parameters
+        text error
+        string[] tags
+        uuid requested_by_user_id FK
+        timestamptz generated_at
+        timestamptz expires_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    %% ============================================================
+    %%  NOTIFICATIONS
+    %% ============================================================
+    users ||--o{ notifications : "target recipient"
+
+    notifications {
+        uuid id PK
+        string channel "email|slack|webhook|pagerduty|sms|in_app"
+        string status "queued|sending|sent|failed|rate_limited"
+        string subject
+        text body
+        string destination
+        string severity
+        int attempts
+        string last_error
+        timestamptz last_attempt_at
+        timestamptz scheduled_at
+        timestamptz sent_at
+        uuid alert_id FK
+        uuid report_id FK
+        uuid recipient_user_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    %% ============================================================
+    %%  OPERATIONS  (audit + settings)
+    %% ============================================================
+    users ||--o{ audit_logs : "actor"
+    users ||--o{ settings   : "last updated by"
+
+    audit_logs {
+        uuid id PK
+        timestamptz ts
+        uuid actor_user_id FK
+        string actor_ip
+        string action
+        string resource_type
+        uuid resource_id
+        string outcome "success|denied|error"
+        string request_id
+        text before
+        text after
+        jsonb context
+    }
+    settings {
+        uuid id PK
+        string scope "global|user|honeypot|device|service"
+        uuid scope_id "nullable FK target"
+        string key
+        text value
+        string value_type "string|int|float|bool|json"
+        bool is_secret
+        int version
+        text description
+        uuid updated_by_user_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    %% ============================================================
+    %%  HONEYPOTS  (existing) — anchors services, sessions, etc.
+    %% ============================================================
+    users    ||--o{ honeypots       : "owner (existing)"
+    honeypots ||--o{ honeypot_events : "produces (existing)"
+
+    honeypots {
+        uuid id PK
+        string name
+        string kind
+        inet bind_ip
+        jsonb config
+        string status
+        timestamptz started_at
+        timestamptz stopped_at
+        uuid owner_user_id FK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    honeypot_events {
+        uuid id PK
+        timestamptz ts
+        string kind
+        inet src_ip
+        int src_port
+        inet dst_ip
+        int dst_port
+        string protocol
+        text raw
+        uuid honeypot_id FK
+        timestamptz created_at
+    }

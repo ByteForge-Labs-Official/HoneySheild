@@ -1,0 +1,14 @@
+target/
+.idea/
+.vscode/
+.git/
+.gitignore
+.dockerignore
+docker-compose*.yml
+*.log
+*.iml
+.class
+.honeypot-db/
+honeypot-data/
+.DS_Store
+Thumbs.db

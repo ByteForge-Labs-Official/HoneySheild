@@ -1,0 +1,183 @@
+# ============================================================================
+# Prometheus — main scrape configuration for the Honeynet Research Platform
+# ============================================================================
+global:
+  scrape_interval: 15s          # default scrape cadence for every job
+  evaluation_interval: 15s      # how often rules are evaluated
+  external_labels:
+    monitor: "honeynet-prometheus"
+    cluster: "${PROMETHEUS_CLUSTER:-honeynet}"
+    env: "${APP_ENV:-development}"
+
+# ---------------------------------------------------------------------------
+# Alertmanager
+# ---------------------------------------------------------------------------
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+          labels:
+            cluster: "${PROMETHEUS_CLUSTER:-honeynet}"
+
+# ---------------------------------------------------------------------------
+# Rule files
+# ---------------------------------------------------------------------------
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# ---------------------------------------------------------------------------
+# Scrape jobs
+# ---------------------------------------------------------------------------
+scrape_configs:
+
+  # -----------------------------------------------------------------------
+  # The Honeynet API itself (FastAPI) — instrumented with
+  # prometheus-fastapi-instrumentator (HTTP) + custom collectors (DB pool,
+  # Celery, AI, honeypot counters).
+  # -----------------------------------------------------------------------
+  - job_name: "honeynet-api"
+    metrics_path: /api/v1/metrics
+    scheme: http
+    follow_redirects: true
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets:
+          - "honeynet-api:8000"
+        labels:
+          service: "honeynet-api"
+          tier: "backend"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+)(:\d+)?'
+        replacement: '$1'
+
+  # -----------------------------------------------------------------------
+  # Node exporter — host CPU/mem/disk/network/processes
+  # -----------------------------------------------------------------------
+  - job_name: "node-exporter"
+    static_configs:
+      - targets:
+          - "node-exporter:9100"
+        labels:
+          service: "node-exporter"
+          tier: "host"
+
+  # -----------------------------------------------------------------------
+  # cAdvisor — per-container resource metrics
+  # -----------------------------------------------------------------------
+  - job_name: "cadvisor"
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - "cadvisor:8080"
+        labels:
+          service: "cadvisor"
+          tier: "host"
+
+  # -----------------------------------------------------------------------
+  # Postgres exporter — DB connection pool, locks, replication, I/O
+  # -----------------------------------------------------------------------
+  - job_name: "postgres-exporter"
+    static_configs:
+      - targets:
+          - "postgres-exporter:9187"
+        labels:
+          service: "postgres-exporter"
+          db: "postgres"
+          tier: "database"
+
+  # -----------------------------------------------------------------------
+  # Redis exporter — memory, hit-rate, evictions, pub/sub lag
+  # -----------------------------------------------------------------------
+  - job_name: "redis-exporter"
+    static_configs:
+      - targets:
+          - "redis-exporter:9121"
+        labels:
+          service: "redis-exporter"
+          db: "redis"
+          tier: "database"
+
+  # -----------------------------------------------------------------------
+  # Honeypot containers — each gets its own /metrics endpoint
+  # -----------------------------------------------------------------------
+  - job_name: "honeypots"
+    metrics_path: /metrics
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/honeypot_targets.json
+        refresh_interval: 30s
+
+  # -----------------------------------------------------------------------
+  # IDS — Suricata + Zeek
+  # -----------------------------------------------------------------------
+  - job_name: "suricata-exporter"
+    static_configs:
+      - targets:
+          - "suricata-exporter:9915"
+        labels:
+          service: "suricata"
+          tier: "ids"
+
+  - job_name: "zeek-exporter"
+    static_configs:
+      - targets:
+          - "zeek-exporter:9916"
+        labels:
+          service: "zeek"
+          tier: "ids"
+
+  # -----------------------------------------------------------------------
+  # Blackbox exporter — synthetic probes (http / tcp / icmp)
+  # -----------------------------------------------------------------------
+  - job_name: "blackbox-http"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://honeynet-api:8000/api/v1/health
+          - http://honeynet-api:8000/api/v1/ready
+          - http://honeynet-gateway:80/
+          - http://honeynet-frontend:3000/
+          - http://grafana:3000/api/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: "blackbox-tcp"
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - postgres:5432
+          - redis:6379
+          - mosquitto:1883
+          - cowrie:2222
+          - dionaea:2223
+          - mqtt-bait:1883
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # -----------------------------------------------------------------------
+  # Prometheus itself — useful for debugging the scrape pipeline
+  # -----------------------------------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets:
+          - "localhost:9090"
+        labels:
+          service: "prometheus"
+          tier: "observability"

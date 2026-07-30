@@ -1,0 +1,16 @@
+node_modules
+dist
+dist-ssr
+.vite
+coverage
+.vitest-cache
+
+.env
+.env.local
+.env.*.local
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+*.log

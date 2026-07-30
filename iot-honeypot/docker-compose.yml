@@ -1,0 +1,201 @@
+# ============================================================================
+# IoT Honeypot — hardened docker-compose
+# ----------------------------------------------------------------------------
+#   5-rule hardening, audit 2026-07-28
+#     1. Non-root execution (uid 10001)            — Dockerfile USER honeypot
+#     2. Read-only root FS + dedicated data volume  — read_only: true + bind
+#     3. ALL Linux capabilities dropped            — cap_drop: [ALL]
+#     4. Resource quotas                           — deploy.resources + ulimits
+#     5. no-new-privileges                         — security_opt
+# ============================================================================
+
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Named volume keeps SQLite WAL/host-key/log out of the container root FS
+# and survives `docker compose down` (set `external: true` for a host bind).
+# ---------------------------------------------------------------------------
+volumes:
+  honeypot-data:
+
+services:
+  honeypot:
+    # Build from the local Dockerfile.  For a released image, replace `build:`
+    # with `image: ghcr.io/<org>/iot-honeypot:<tag>` and add a `pull_policy`.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iot-honeypot:hardened
+    container_name: iot-honeypot
+    hostname: iot-honeypot
+
+    restart: unless-stopped
+
+    # -------------------------------------------------------------------------
+    # Rule 4: Resource quotas — hard ceiling that the kernel will enforce even
+    # if the JVM ignores -Xmx.  No swap (mem_swappiness: 0 isn't a thing in
+    # compose; we get the same effect by capping memory AND setting `pids_limit`
+    # so the cgroup can't grow).
+    # -------------------------------------------------------------------------
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"        # Rule 4 — half a core
+          memory: 256M       # Rule 4 — 256 MiB
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+      # Compose v3.9 ignores `restart_policy` inside deploy on swarm, but on
+      # plain `docker compose up` it keeps the container on `unless-stopped`.
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+        delay: 5s
+
+    # -------------------------------------------------------------------------
+    # Rule 2: Read-only root filesystem.
+    #   The image's /app is already chmod 0550; /data is the only writable
+    #   path via the named volume below.  tmpfs is mounted only where the JVM
+    #   needs scratch space, with nosuid/nodev/noexec flags.
+    # -------------------------------------------------------------------------
+    read_only: true
+    tmpfs:
+      # /tmp for the JVM scratch (NIO direct buffers, etc.)
+      - /tmp:size=64m,mode=1777,nosuid,nodev,noexec
+      # /run for ephemeral sockets (none today, but cheap)
+      - /run:size=8m,mode=0755,nosuid,nodev,noexec
+
+    volumes:
+      - honeypot-data:/data
+
+    # -------------------------------------------------------------------------
+    # Rule 3: drop ALL Linux capabilities.
+    #   The honeypot only needs to bind TCP sockets on port 2222/8080/554,
+    #   which is allowed by default in the `moby` seccomp profile.  No CAP_NET_RAW,
+    #   no CAP_SYS_ADMIN, no CAP_SYS_PTRACE.  Defense-in-depth even though the
+    #   image already runs unprivileged.
+    # -------------------------------------------------------------------------
+    cap_drop:
+      - ALL
+    # We intentionally do NOT add any capability back.  The default cap_set
+    # is empty, which is the safest baseline for an IoT honeypot that only
+    # needs inbound TCP.
+    # capabilities:
+    #   add: []      # leave commented — by default no caps are added
+
+    # -------------------------------------------------------------------------
+    # Rule 5: no-new-privileges + seccomp + apparmor.
+    # -------------------------------------------------------------------------
+    security_opt:
+      - no-new-privileges:true            # Rule 5 (privilege escalation)
+      - seccomp:default                   # Moby's default deny-by-default syscall filter
+      # - apparmor:docker-default         # uncomment on Ubuntu/Debian hosts
+
+    # -------------------------------------------------------------------------
+    # Belt-and-braces: also drop dangerous sysctls if the host permits them.
+    # Modern compose requires these to be in the 'sysctls' top-level array
+    # in some versions; if your compose schema rejects them under 'service',
+    # move them under the `sysctls:` block of the service definition.
+    # -------------------------------------------------------------------------
+    sysctls:
+      - net.core.somaxconn=128
+      - net.ipv4.tcp_syncookies=1
+      - net.ipv4.tcp_max_syn_backlog=128
+      - net.ipv4.conf.all.rp_filter=1
+      - net.ipv4.conf.default.rp_filter=1
+
+    # -------------------------------------------------------------------------
+    # PIDs limit caps the # of threads the JVM (or any forks) can spawn.
+    # Together with cpus: 0.5 and memory: 256M this is a hard DoS ceiling.
+    # -------------------------------------------------------------------------
+    pids_limit: 256
+
+    # -------------------------------------------------------------------------
+    # Ulimits: cap file descriptors (Rule 2 — FD leak prevention) and the
+    # number of mmap regions.  Combined with read_only FS, even a runaway
+    # JVM can't exhaust the host's FD pool.
+    # -------------------------------------------------------------------------
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+      nproc:
+        soft: 128
+        hard: 256
+      fsize: 268435456     # 256 MiB — refuse to write bigger files (log/db)
+
+    # -------------------------------------------------------------------------
+    # Ports: bind ONLY the protocols this profile actually exposes.  The
+    # `honeypot.profile=full` system property selects SSH+HTTP+RTSP inside
+    # the JVM; you can override per deployment via environment.
+    # -------------------------------------------------------------------------
+    ports:
+      # SSH  (IoT botnets)
+      - "2222:2222/tcp"
+      # HTTP (web admin / ONVIF / lock)
+      - "8080:8080/tcp"
+      # RTSP (camera scanners)
+      - "554:554/tcp"
+
+    # -------------------------------------------------------------------------
+    # Bind to a dedicated host interface (optional).  Comment this out if
+    # you want the container reachable from the bridge.
+    # network_mode: host
+    # -------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
+    # Environment: keep secrets out of the image.  Defaults match Dockerfile.
+    # Override HONEYPOT_PROFILE to enable/disable protocols per deployment.
+    # -------------------------------------------------------------------------
+    environment:
+      HONEYPOT_PORT: "2222"
+      HONEYPOT_PROFILE: "full"           # "ssh" | "http" | "rtsp" | "full"
+      JAVA_OPTS: >-
+        -Xms64m -Xmx256m
+        -XX:MaxRAMPercentage=75.0
+        -XX:+ExitOnOutOfMemoryError
+        -Djava.security.egd=file:/dev/./urandom
+      TZ: "UTC"
+
+    # -------------------------------------------------------------------------
+    # Healthcheck — uses the SSH port as a liveness probe.  The container
+    # doesn't speak a real protocol, but refusing connections means dead.
+    # -------------------------------------------------------------------------
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 2222 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # Logging — cap log size so a misbehaving attacker can't fill the host
+    # disk via the JSON log driver.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Don't pollute /etc/hosts inside the container.
+    dns: 1.1.1.1 9.9.9.9
+    dns_search: []
+
+    # The user namespace is already handled by USER honeypot (uid 10001)
+    # inside the image; if you want to remap onto a host user with a
+    # different uid, use `userns_mode` at deploy time instead.
+
+# ---------------------------------------------------------------------------
+# A separate, optional network keeps the honeypot isolated from any
+# "trusted" compose stack you might be running on the same host.
+# ---------------------------------------------------------------------------
+networks:
+  default:
+    name: honeypot-net
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.42.0/24

@@ -1,0 +1,85 @@
+{
+  "title": "Honeynet — Database (Postgres + Redis)",
+  "uid": "honeynet-database",
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["honeynet", "database"],
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Postgres connections by state",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "sum by (state) (pg_stat_activity_count)",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Transactions per second",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 7 },
+      "targets": [
+        { "expr": "rate(pg_stat_xact_commit[1m])", "legendFormat": "commits/s" },
+        { "expr": "rate(pg_stat_xact_rollback[1m])", "legendFormat": "rollbacks/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Replication lag (seconds)",
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+      "targets": [
+        { "expr": "pg_stat_replication_lag_seconds", "legendFormat": "{{instance}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Top tables by dead tuples",
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "topk(10, pg_stat_user_tables_n_dead_tup)",
+          "legendFormat": "{{relname}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis memory use vs maxmemory",
+      "gridPos": { "x": 0, "y": 14, "w": 12, "h": 7 },
+      "targets": [
+        { "expr": "redis_used_memory_bytes", "legendFormat": "used" },
+        { "expr": "redis_maxmemory", "legendFormat": "max" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis hit-rate (%)",
+      "gridPos": { "x": 12, "y": 14, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "(rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))) * 100",
+          "legendFormat": "hit-rate %"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis evictions /s",
+      "gridPos": { "x": 0, "y": 21, "w": 12, "h": 7 },
+      "targets": [
+        { "expr": "rate(redis_evicted_keys_total[5m])", "legendFormat": "evicted/s" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Redis blocked clients",
+      "gridPos": { "x": 12, "y": 21, "w": 12, "h": 4 },
+      "targets": [ { "expr": "redis_blocked_clients" } ]
+    }
+  ]
+}

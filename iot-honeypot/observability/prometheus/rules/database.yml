@@ -1,0 +1,92 @@
+groups:
+  - name: database.postgres
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels: { severity: critical, tier: database, service: postgres }
+        annotations:
+          summary: "Postgres exporter reports pg_up == 0 on {{ $labels.instance }}"
+
+      - alert: PostgresConnectionsHigh
+        expr: |
+          (sum by (instance) (pg_stat_activity_count)
+            / on(instance) pg_settings_max_connections) * 100 > 80
+        for: 5m
+        labels: { severity: warning, tier: database }
+
+      - alert: PostgresIdleInTransaction
+        expr: pg_stat_activity_count{state="idle in transaction"} > 10
+        for: 5m
+        labels: { severity: warning, tier: database }
+        annotations:
+          summary: "{{ $value }} idle-in-transaction sessions"
+
+      - alert: PostgresLongTransaction
+        expr: pg_stat_activity_max_tx_duration > 300
+        for: 5m
+        labels: { severity: critical, tier: database }
+        annotations:
+          summary: "Transaction running > 5 m on {{ $labels.instance }}"
+
+      - alert: PostgresReplicationLagHigh
+        expr: pg_stat_replication_lag_seconds > 30
+        for: 5m
+        labels: { severity: warning, tier: database }
+
+      - alert: PostgresDeadTuples
+        expr: |
+          (pg_stat_user_tables_n_dead_tup / (pg_stat_user_tables_n_live_tup + 1)) > 0.2
+        for: 30m
+        labels: { severity: warning, tier: database }
+        annotations:
+          summary: "Table {{ $labels.relname }} > 20 % dead tuples — autovacuum lagging"
+
+      - alert: PostgresLockContention
+        expr: pg_locks_count > 200
+        for: 10m
+        labels: { severity: warning, tier: database }
+
+      - alert: PostgresDiskGrowing
+        expr: predict_linear(pg_database_size_bytes[6h], 6 * 3600) > 100 * 1024 * 1024 * 1024
+        for: 1h
+        labels: { severity: warning, tier: database }
+        annotations:
+          summary: "Database size trending > 100 GB within 6 h"
+
+  - name: database.redis
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels: { severity: critical, tier: database, service: redis }
+
+      - alert: RedisMemoryHigh
+        expr: |
+          (redis_used_memory_bytes / redis_maxmemory) * 100 > 80
+        for: 5m
+        labels: { severity: warning, tier: database }
+        annotations:
+          summary: "Redis using {{ $value | printf \"%.1f\" }} % of maxmemory"
+
+      - alert: RedisEvictionsRising
+        expr: rate(redis_evicted_keys_total[5m]) > 0
+        for: 10m
+        labels: { severity: warning, tier: database }
+        annotations:
+          summary: "Redis is evicting keys — increase memory or lower TTLs"
+
+      - alert: RedisHitRateLow
+        expr: |
+          (sum(rate(redis_keyspace_hits_total[5m]))
+            / (sum(rate(redis_keyspace_hits_total[5m])) + sum(rate(redis_keyspace_misses_total[5m])))) * 100
+          < 90
+        for: 15m
+        labels: { severity: warning, tier: database }
+        annotations:
+          summary: "Redis cache hit-rate < 90 % — review TTLs / key sizing"
+
+      - alert: RedisBlockedClients
+        expr: redis_blocked_clients > 10
+        for: 5m
+        labels: { severity: warning, tier: database }

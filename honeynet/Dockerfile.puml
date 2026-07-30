@@ -1,0 +1,77 @@
+@startuml
+title Honeynet Reference Architecture
+
+skinparam nodePadding 12
+skinparam componentPadding 8
+
+node "Attacker\nInternet" as Attacker
+
+package "Edge / Gateway" {
+  [Traefik\n:80/:443] as Traefik
+  [MQTT Bridge\n:1883/:8883] as MqttBridge
+}
+
+package "Honeypot Subnet" {
+  [SSH Cowrie]      as Cowrie
+  [HTTP IoT Camera] as HttpCam
+  [RTSP Camera]     as RtspCam
+  [MQTT Broker]     as Mqtt
+  [Telnet Dionaea]  as Dionaea
+  [Modbus PLC]      as Modbus
+  [UPnP Router]     as Upnp
+}
+
+package "Telemetry Subnet" {
+  [Suricata] as Suri
+  [Zeek]     as Zeek
+}
+
+package "Data Plane" {
+  database "PostgreSQL" as Pg
+  database "Redis"      as R
+  [Elasticsearch\n+ Kibana] as Elk
+}
+
+package "App Plane" {
+  [FastAPI\nbackend]  as Api
+  [Celery\nworkers]   as W
+  [AI Service\n(local/ollama/openai)] as Ai
+}
+
+package "Presentation" {
+  [React\nDashboard] as Ui
+  [Grafana]          as Grafana
+}
+
+Attacker --> Traefik
+Attacker --> MqttBridge
+Traefik --> Cowrie
+Traefik --> HttpCam
+Traefik --> RtspCam
+Traefik --> Dionaea
+Traefik --> Modbus
+Traefik --> Upnp
+MqttBridge --> Mqtt
+
+Suri ..> Traefik :   mirror
+Zeek ..> Traefik :   mirror
+
+Cowrie     --> R :   push
+HttpCam    --> R :   push
+RtspCam    --> R :   push
+Mqtt       --> R :   push
+Dionaea    --> R :   push
+Modbus     --> R :   push
+Upnp       --> R :   push
+Suri       --> Elk
+Zeek       --> Elk
+R          --> Api
+R          --> W
+Api        --> Pg
+W          --> Pg
+Api        --> Ai
+Ui         --> Api  : REST + WS
+Grafana    --> Pg
+Grafana    --> Elk
+
+@enduml

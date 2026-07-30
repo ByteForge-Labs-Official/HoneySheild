@@ -1,0 +1,42 @@
+%% Volume relationships — which service mounts which named volume, and in what mode
+flowchart LR
+    classDef vol   fill:#3a2a14,stroke:#f5a623,color:#fff
+    classDef rw    fill:#3a2a14,stroke:#f5a623,color:#fff
+    classDef ro    fill:#1a1a1a,stroke:#888,color:#aaa,stroke-dasharray:4 4
+    classDef svc   fill:#0b3d6b,stroke:#5aa9ff,color:#fff
+
+    HDA[("honeypot-data<br/>SQLite + logback")]:::rw
+    PDA[("postgres-data<br/>/var/lib/postgresql/data")]:::rw
+    RDA[("redis-data<br/>AOF + RDB")]:::rw
+    PRA[("prometheus-data<br/>TSDB + WAL")]:::rw
+    GRA[("grafana-data<br/>plugins + cache")]:::rw
+    AMA[("alertmanager-data<br/>silences + nlog")]:::rw
+    CDA[("caddy-data<br/>certs + ACME acct")]:::rw
+    CCA[("caddy-config<br/>autosave.json")]:::rw
+
+    HP["honeypot"]:::svc
+    RLY["relay"]:::svc
+    PG["postgres"]:::svc
+    RDS["redis"]:::svc
+    PR["prometheus"]:::svc
+    GR["grafana"]:::svc
+    AM["alertmanager"]:::svc
+    GW["gateway (Caddy)"]:::svc
+
+    HP -- "RW /data" --> HDA
+    RLY -. "RO /data" .-> HDA
+    PG -- "RW /var/lib/postgresql/data" --> PDA
+    RDS -- "RW /data" --> RDA
+    PR -- "RW /prometheus" --> PRA
+    GR -- "RW /var/lib/grafana" --> GRA
+    AM -- "RW /alertmanager" --> AMA
+    GW -- "RW /data" --> CDA
+    GW -- "RW /config" --> CCA
+
+    %% Config overlays (read-only bind mounts)
+    PG -. "RO /etc/postgresql/postgresql.conf<br/>RO /docker-entrypoint-initdb.d/*.sql" .-> CFG1[(host: deploy/postgres)]:::ro
+    RDS -. "RO /usr/local/etc/redis/redis.conf" .-> CFG2[(host: deploy/redis)]:::ro
+    PR -. "RO /etc/prometheus/prometheus.yml<br/>RO /etc/prometheus/rules/*.yml" .-> CFG3[(host: deploy/observability)]:::ro
+    GR -. "RO /etc/grafana/grafana.ini" .-> CFG3
+    AM -. "RO /etc/alertmanager/alertmanager.yml" .-> CFG3
+    GW -. "RO /etc/caddy/Caddyfile<br/>RO /srv/index.html" .-> CFG4[(host: deploy/gateway)]:::ro

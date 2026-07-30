@@ -1,0 +1,46 @@
+# --- Build outputs ---
+target/
+*.class
+*.jar
+*.war
+
+# --- Maven ---
+.mvn/wrapper/maven-wrapper.jar
+
+# --- Honeypot runtime artifacts (regenerated each run) ---
+honeypot.db
+honeypot.log
+honeypot.err
+hostkey.ser
+hostkey.ser.bak
+
+# --- Captured attacker data (do NOT commit) ---
+data/captures/
+data/pcap/
+data/uploads/
+
+# --- BouncyCastle dependency (built into lib/ but reproducible via Maven) ---
+lib/
+
+# --- IDE / OS noise ---
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+*.swp
+Thumbs.db
+.DS_Store
+
+# --- Logs ---
+*.log
+*.err
+logs/
+
+# --- Secrets / env ---
+.env
+.env.local
+*.pem
+*.key
+secrets/

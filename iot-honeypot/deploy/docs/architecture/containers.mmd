@@ -1,0 +1,66 @@
+%% Container topology — services grouped by network
+%% Render: https://mermaid.ink/ or any Mermaid live editor
+flowchart LR
+    classDef bait fill:#7a0000,stroke:#ff4d4d,color:#fff,stroke-width:2px
+    classDef ops  fill:#0b3d6b,stroke:#5aa9ff,color:#fff,stroke-width:1px
+    classDef edge fill:#0f5e2f,stroke:#7ee08a,color:#fff,stroke-width:1px
+    classDef ext  fill:#222,stroke:#aaa,color:#fff,stroke-dasharray:4 4
+
+    Internet([Internet / Attacker]):::ext
+
+    subgraph baitNet["bait-net  (internal, ICC off)"]
+        direction TB
+        Honeypot["honeypot<br/>Java/MINA  SSH :2222  HTTP :8080  RTSP :554"]:::bait
+        Relay1["relay (bait-net side)"]:::bait
+    end
+
+    subgraph opsNet["ops-net  (internal, ICC on)"]
+        direction TB
+        Postgres["postgres :5432<br/>TimescaleDB"]:::ops
+        Redis["redis :6379<br/>Streams + AOF"]:::ops
+        Relay2["relay (ops-net side)<br/>:9101 /metrics"]:::ops
+        Prometheus["prometheus :9090"]:::ops
+        Grafana["grafana :3000"]:::ops
+        Alertmanager["alertmanager :9093"]:::ops
+        NodeExp["node-exporter :9100"]:::ops
+        PgExp["postgres-exporter :9187"]:::ops
+        RedisExp["redis-exporter :9121"]:::ops
+        Blackbox["blackbox-exporter :9115"]:::ops
+    end
+
+    subgraph edgeNet["edge-net  (default, ICC on)"]
+        direction TB
+        Gateway["gateway<br/>Caddy 2.7  :80 → :443"]:::edge
+        GrafanaE["grafana :3000 (edge side)"]:::edge
+        AlertmanagerE["alertmanager :9093 (edge side)"]:::edge
+    end
+
+    Internet -->|"443 TCP<br/>DNS-01 TLS"| Gateway
+
+    Gateway -->|"reverse-proxy<br/>SSH banner"| Honeypot
+    Gateway -->|"subdomain vhosts"| GrafanaE
+    Gateway -->|"subdomain vhosts"| AlertmanagerE
+
+    Honeypot -->|"/data/honeypot.db<br/>/data/honeypot.log"| Relay1
+    Relay1 -.same container.-> Relay2
+    Relay2 -->|"INSERT events.attack"| Postgres
+    Relay2 -->|"XADD honeynet:events:*"| Redis
+
+    Prometheus -->|"scrape"| Relay2
+    Prometheus -->|"scrape"| Postgres
+    Prometheus -->|"scrape"| Redis
+    Prometheus -->|"scrape"| NodeExp
+    Prometheus -->|"scrape"| PgExp
+    Prometheus -->|"scrape"| RedisExp
+    Prometheus -->|"scrape"| Blackbox
+    Prometheus -->|"probe via blackbox"| Honeypot
+
+    Prometheus -->|"alerts"| Alertmanager
+    Alertmanager -->|"webhook"| PagerDuty([PagerDuty])
+    Alertmanager -->|"webhook"| SlackSec([Slack #sec])
+    Alertmanager -->|"webhook"| SlackOps([Slack #ops])
+    Alertmanager -->|"SMTP"| Email([Email])
+
+    Grafana -->|"query"| Prometheus
+    Grafana -->|"panels"| Postgres
+    Grafana -->|"stream depth"| Redis

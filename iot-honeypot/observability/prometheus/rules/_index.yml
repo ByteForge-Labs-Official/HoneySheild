@@ -1,0 +1,10 @@
+# Rule-file index — `rule_files` in prometheus.yml already globs
+# /etc/prometheus/rules/*.yml, but we keep this file as documentation so
+# each rule file has a stable name.
+
+host.yml         # node-exporter (CPU, memory, disk, network, processes)
+containers.yml   # cAdvisor per-container alerts
+database.yml     # postgres-exporter + redis-exporter
+application.yml  # FastAPI, AI, Celery, business metrics
+honeypot.yml     # honeypot-specific (unauth attempts, connection surge)
+probes.yml       # blackbox synthetic probes
